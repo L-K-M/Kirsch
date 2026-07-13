@@ -166,7 +166,7 @@ Learned processing comes after the benchmark and classical baseline:
 
 Every scan is a small provenance package, not one silently overwritten JPEG:
 
-1. **Acquisition record:** original DNG/YUV frames, capture metadata, app/device version, and calibration inputs. This is never modified.
+1. **Acquisition record:** capture metadata, app/device version, calibration inputs, and the source DNG/YUV burst while retained. Source frames are immutable, but keeping every burst is opt-in: archival mode shows the storage estimate and retains or exports it; the default mode deletes source frames only after successful fusion and explicit scan acceptance.
 2. **Base master candidate:** minimally processed, color-managed, target-bearing output where an archival target was captured. Any fusion is documented and must be validated before this is described as an archival master.
 3. **Production derivative:** cropped/rectified and glare-reduced image for ordinary viewing and sharing.
 4. **Restored derivative:** opt-in denoise, descreen, scratch removal, fade correction, or other content-changing operations with a saved recipe.
@@ -240,9 +240,10 @@ Set numerical thresholds before looking at final test results. At minimum:
 
 - **Gate A, physics:** on the pre-registered held-out test, the print-level confidence interval for the primary endpoint must clear the practical superiority margin over PhotoScan and the best single frame, while pre-registered no-regression bounds pass for ghosting, color error, and lost legitimate highlights.
 - **Gate B, capture:** direct Camera2 must deliver a usable RAW or YUV burst on the target device classes without unacceptable stalls, drops, memory pressure, or thermal collapse.
-- **Gate C, workflow:** representative users must complete the unguided capture reliably; otherwise revise capture before building restoration features.
-- **Gate D, legal:** counsel must chart the final capture/fusion flow against the relevant claims in target jurisdictions before UX freeze.
-- **Gate E, licensing:** every code, model, weight, dataset, and training dependency in the selected path must have an artifact-level bill of materials and approved use.
+- **Gate C, runtime:** pre-register and pass per-device limits for post-capture latency, peak memory, energy, and thermal degradation, including a sustained batch soak rather than one cold run.
+- **Gate D, workflow:** representative users must complete the unguided capture reliably; otherwise revise capture before building restoration features.
+- **Gate E, legal:** counsel must chart the final capture/fusion flow against the relevant claims in target jurisdictions before UX freeze.
+- **Gate F, licensing:** every code, model, weight, dataset, and training dependency in the selected path must have an artifact-level bill of materials and approved use.
 
 If Gate A fails, stop the larger product plan and investigate capture geometry/lighting rather than hiding the failure with generative restoration.
 
@@ -421,7 +422,7 @@ An architecture can be independently reimplemented without copying code, but tha
 - Create the artifact-level license BOM.
 - Run 8 to 12 observed usability sessions on the unguided multi-view flow.
 
-Deliverable: a reproducible technical report and Gate A through E decision, not a polished app.
+Deliverable: a reproducible technical report and Gate A through F decision, not a polished app.
 
 ### Phase 1: conservative capture MVP (3 to 4 months, conditional)
 
