@@ -23,6 +23,7 @@ This is an engineering research plan, not a claim that every cited technique tra
 11. [Roadmap](#11-roadmap)
 12. [Open decisions and risks](#12-open-decisions-and-risks)
 13. [Primary references](#13-primary-references)
+- [Appendix A: product rationale and positioning hypotheses](#appendix-a-product-rationale-and-positioning-hypotheses-unvalidated)
 
 ## 1. Validation verdict
 
@@ -85,6 +86,8 @@ The following are hypotheses, not established market facts:
 - A trustworthy separation between faithful correction and generative enhancement matters to archivists and families.
 
 Do not use commercial market-size reports, isolated reviews, or store ratings as TAM proof. Before pricing or positioning is frozen, run customer interviews and document review mining by store, country, date range, sample size, deduplication method, taxonomy, and counts.
+
+Appendix A preserves the original proposal's fuller product rationale as explicitly unvalidated hypotheses and demand signals, to structure that interview and review-mining work.
 
 ### 2.4 Competitive baseline
 
@@ -378,6 +381,7 @@ OpenDICE is appropriate for off-device qualification using supported targets and
 - A paper-white border is a useful uncertain prior, not a neutral truth; age and stock can shift it materially.
 - A session profile characterizes the capture setup. Report Delta E only on independent known verification patches in that capture, never as the unknown photograph's color error.
 - A 24-patch ColorChecker can support checks but is not sufficient for a robust custom ICC profile under the cited FADGI guidance. Use a separately characterized, sufficiently sampled profiling target.
+- Learned illuminant estimation is a Phase 2 candidate for target-free color, not an MVP dependency. Compact cross-camera models exist: C5 (ICCV 2021, reported at roughly 2 MB) self-calibrates from unlabeled test-time frames, while CCMNet (2025, reported at roughly 1 MB) derives a camera fingerprint from the same pre-calibrated color-calibration matrices this pipeline already reads from DNG/ISP metadata. Verify the reported footprints and input requirements against the released code and weights before any architecture work assumes them; adopt one only after artifact-level license review and a measured Delta E00 improvement on independent verification patches in the benchmark.
 
 ### 9.3 Scale and resolution terminology
 
@@ -393,6 +397,14 @@ Never call pixel dimensions or an ARCore estimate measured DPI. Use PPI for imag
 Android `Bitmap.compress()` does not provide TIFF or JPEG XL and does not establish preservation of high bit depth. Keep the high-bit-depth pipeline in native memory and integrate explicit audited encoders such as libtiff and libpng; add libjxl only after compatibility and packaging tests. Treat ordinary Android HEIF as an 8-bit derivative unless a separate high-bit-depth path is proven.
 
 C2PA is feasible but deferred. Production use requires more than writing a manifest: signing identities, certificate enrollment and rotation, Android Keystore/StrongBox integration, timestamping, revocation, format validation, and a policy for stripped credentials. C2PA binds signed assertions to an asset; it does not prove that the assertions are true.
+
+### 9.5 Identity-drift QA for generative derivatives
+
+Generative face restoration can silently change who a person appears to be; one low-resolution input maps to many plausible restored identities. Before any face-touching generative derivative ships:
+
+- Regression-test identity preservation with a face-embedding distance (ArcFace-class) and a landmark-fidelity metric between input and output, using pre-registered thresholds on a held-out set that includes small, blurred, and damaged faces.
+- Recent restoration work (HonestFace, RestorerID) treats identity preservation as an explicit objective and supplies evaluation protocols; reuse the protocols even where those models are not used, subject to the Section 10 artifact review.
+- A result that fails the identity checks must not be shown as a default output, and identity metrics belong in the release gates for every model update, since a quantization or distillation step can shift them.
 
 ## 10. Licensing controls
 
@@ -443,12 +455,13 @@ Deliverable: a reproducible technical report and Gate A through F decision, not 
 - Album-page instance detection and segmentation after patent review.
 - Back-of-photo camera HTR with mandatory confirmation.
 - Physical-target archival workflow and published metric results.
+- Learned illuminant estimation for target-free color (C5/CCMNet-class), gated on the Section 9.2 license review and measured verification-patch improvement.
 - Accessibility work based on dedicated screen-reader, low-vision, motor, and eyes-free testing.
 
 ### Phase 3: explicitly derived outputs
 
 - Descreening, dust/scratch removal, and fade correction as restored derivatives.
-- Prior-driven super-resolution, face restoration, inpainting, and colorization as generative derivatives.
+- Prior-driven super-resolution, face restoration, inpainting, and colorization as generative derivatives, each gated on the Section 9.5 identity-drift checks where faces are involved.
 - C2PA only after the trust/signing and stripped-manifest product design is complete.
 - Optional attested cloud processing only after privacy, economics, and deletion behavior are independently reviewed.
 
@@ -509,6 +522,13 @@ Ranked by ability to invalidate or reshape the plan:
 - ISO 19264-1:2021 overview: https://www.iso.org/standard/79172.html
 - DNG specification: https://helpx.adobe.com/camera-raw/digital-negative.html
 - FADGI TIFF metadata guidance: https://www.digitizationguidelines.gov/guidelines/TIFF_Metadata_Final.pdf
+- C5 cross-camera color constancy (ICCV 2021): https://arxiv.org/abs/2011.11890
+- CCMNet (2025): https://arxiv.org/abs/2504.07959
+
+### Restoration evaluation
+
+- HonestFace (identity-preserving face restoration and metrics, 2025): https://arxiv.org/abs/2505.18469
+- RestorerID (reference-conditioned, identity-preserving restoration, 2024): https://arxiv.org/abs/2411.14125
 
 ### Patent records for counsel review
 
@@ -519,3 +539,27 @@ Ranked by ability to invalidate or reshape the plan:
 - Microsoft flash/no-flash record: https://patents.google.com/patent/US7457477B2/en
 
 Secondary reviews and app-store comments remain useful for forming interview questions and failure taxonomies, but primary documentation and reproducible tests control technical decisions in this plan.
+
+## Appendix A: product rationale and positioning hypotheses (unvalidated)
+
+This appendix preserves the original proposal's product rationale as input for the Section 2.3 hypothesis tests. Everything here derives from secondary sources — store listings, app reviews, press coverage, and market reports — and none of it is validated. It exists to structure interviews, review mining, and prioritization; it does not gate engineering decisions.
+
+### A.1 Positioning hypotheses
+
+- **Fidelity with receipts.** Incumbents under-deliver on resolution and on the honesty of their claims (PhotoScan's output cap and compression; a documented Photomyne export carried a default 72-dpi resolution tag). Publishing measured per-scan metrics using the Section 9.3 terminology could be a durable differentiator precisely because reviewers can verify it.
+- **Three fragmented jobs in one app.** Review roundups suggest users combine apps today: multi-frame glare reduction (PhotoScan's distinctive strength), album-page batch capture (Photomyne's strength), and restoration (Reimagine-class apps). No product does all three well.
+- **Privacy as a headline.** On-device processing is a marketable trust claim against cloud-processing competitors and mail-in services that require shipping irreplaceable originals. Photomyne faced an Illinois BIPA class action (filed July 2024, voluntarily dismissed September 2024) — a signal that face-related features in this category carry legal and trust sensitivity.
+- **Anti-subscription pricing.** Subscription fatigue is a recurring complaint in incumbent reviews (Photomyne listed at $59.99/yr and Reimagine at $49.99/yr at research time) for what is often a one-time family project. The hypothesis: free capture plus a one-time purchase (roughly $20 to $40) for pro features converts better and generates favorable reviews.
+- **Own what hardware cannot do.** Photos glued in albums, framed behind glass, oversized prints, and photos encountered at relatives' homes are structurally unserved by sheet-fed scanners and mail-in services.
+- **Trust engineering as a feature.** Reviewers punish over-processing. Preserved originals, per-effect before/after toggles, and the Section 4.1 derivative separation are user-visible product claims, not only engineering hygiene.
+
+### A.2 Demand signals (secondary, unverified)
+
+- Market reports size photo-digitization services at roughly $2.6B (2024) growing toward a projected $5.3B by 2032. Direction-of-travel signal only; not TAM proof.
+- Microsoft Lens retirement (removed from stores 2026-02-09; scanning disabled 2026-03-09) creates a displaced-user acquisition channel with partial audience overlap.
+- User threads report PhotoScan install failures on some recent devices. Per Section 2.2 this is not general unavailability, but the associated search queries are a live, low-competition acquisition channel worth monitoring.
+- Rating asymmetry between PhotoScan's iOS and Play listings (higher on iOS at research time) suggests platform-skewed satisfaction worth probing in interviews.
+
+### A.3 Use of this appendix
+
+Convert each bullet into an interview question or a scoped review-mining query per Section 2.3 before it influences pricing, positioning, or scope. Promote a hypothesis into the plan body only with the same evidence standard the rest of this document applies.
