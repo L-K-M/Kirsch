@@ -29,11 +29,13 @@ This file separates implemented tooling from physical evidence. A green software
 
 Eleven capture packages from a HUAWEI GRL-AL10 (one with full frame payloads) were audited; see [`benchmark/reports/2026-07-13-grl-al10-capture-audit.md`](benchmark/reports/2026-07-13-grl-al10-capture-audit.md). Measured on that device: YUV stream combination and cadence (RAW absent — the fallback path was exercised), 3A lock behavior (AE lock reported `LOCKED` while the HAL swapped exposure/ISO at a constant exposure×gain product), payload integrity, and an ORB+MAGSAC++ registration/fusion baseline (~1.2px mean residual). One defect found and fixed: replaying HAL-reported color-correction gains with AWB off baked an implausible white balance into the burst (`WhiteBalanceStrategy` now prefers AWB lock). The audited captures contained no glare and no camera motion, so they qualify the capture path only — not Gate A. Offline analysis commands: `benchmark/tools/analyze_capture.py` (`audit`, `fuse`; requires numpy and opencv-python-headless, recorded in `ARTIFACTS.csv`).
 
+A second device entered the matrix via the in-app zip export: an HMD Fusion (LEVEL_3; RAW, manual sensor, and burst capabilities all present — the first device able to exercise the full linear-RAW quality path). Evidence so far: steady 30fps cadence in both YUV and RAW modes; the manual-sensor exposure path engaged (AE off with explicit values); AWB lock honored with plausible reported gains; a `raw-sensor` burst persists and audits clean (DNG decode still unverified — the analysis tool is I420-only); and owner-run YUV fusion reproduced the min-equals-floor optimality result seen on the GRL-AL10 (0.9747% residual against a 0.9747% floor). A harmless "3A lock timed out" warning revealed that the lock-wait predicate should not expect `AE_STATE_LOCKED` on the manual-sensor path (candidate controller fix). See [`benchmark/reports/2026-07-13-hmd-fusion-capture-audit.md`](benchmark/reports/2026-07-13-hmd-fusion-capture-audit.md).
+
 ## Not Yet Executed
 
 The following remain unmeasured:
 
-- stream combination success and RAW cadence on a RAW-capable phone (only a YUV-only device is qualified so far)
+- RAW payload verification: HMD Fusion RAW bursts persist and audit clean at 33.3ms cadence, but the DNG files have not been decoded or fused (analysis tool is I420-only)
 - OEM timestamp equality and `DngCreator` interoperability
 - logical-camera switching behavior beyond the single audited device
 - ImageReader buffer pressure and partial/failure behavior
@@ -51,6 +53,7 @@ Fill one row per physical camera/device/OS build. Do not merge results across up
 | Device instance | Model/build | Camera ID | Hardware level | RAW | Manual sensor/post | Burst capability | Preview+RAW | Preview+YUV | 5-frame cadence | Drops | Peak memory | Thermal soak | DNG opens | Notes |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|
 | owner-primary | HUAWEI GRL-AL10, Kirin 9010, Android 12 / API 31, build 104.2.0.201C00 | 0 (bursts on physical 2) | LIMITED | no | no / yes | no | n/a (no RAW) | yes, 3344x3072 I420 | 42ms (~24fps) x10 bursts; 50-53ms x1 | 0 in 11 bursts | pending | pending | n/a (no RAW) | AE/AWB lock available; AE lock swaps exposure/ISO at constant product; WB replay defect found and fixed; no GMS (no ARCore/ML Kit); see 2026-07-13 audit report |
+| owner-secondary | HMD Fusion (Nighthawk), Qualcomm, Android 15 / API 35, build 00WW_2_83B | 0 | LEVEL_3 | yes | yes / yes | yes | yes, 33.3ms (owner-run audit) | yes, 4000x3000 I420 | 33.3ms (30fps), RAW and YUV | 0 in 2 bursts (YUV `...c9834f8c`, RAW `...29656dcb`) | pending | pending | packages persist + audit clean; DNG decode not yet verified | Manual-sensor exposure path engaged (AE off + explicit values); AWB lock honored; HAL reports plausible gains and real CCM; "3A lock timed out" warning is expected on the manual-sensor path (predicate fix candidate); YUV fusion reproduces min==floor optimality; see 2026-07-13 HMD report |
 
 Minimum first pass:
 
