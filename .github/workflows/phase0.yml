@@ -43,7 +43,7 @@ jobs:
       - name: Test, assemble, and lint
         run: ./gradlew testDebugUnitTest assembleDebug lintDebug
       - name: Upload debug APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: kirsch-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
