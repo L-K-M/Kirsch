@@ -1,0 +1,135 @@
+{
+  "schema_version": "0.1.0",
+  "dataset_id": "kirsch-fixture-development",
+  "study_phase": "protocol-development",
+  "created_utc": "2026-07-13T12:00:00Z",
+  "protocol": {
+    "protocol_id": "kirsch-protocol",
+    "version": "0.1.0",
+    "status": "draft",
+    "validator_version": "0.1.0",
+    "capture_protocol_asset_id": "asset-capture-protocol",
+    "annotation_protocol_asset_id": "asset-annotation-protocol",
+    "metric_spec_asset_id": "asset-metric-spec",
+    "git_commit": "fixture0",
+    "git_dirty": true
+  },
+  "access_policy": "test fixture only",
+  "assets": [
+    {
+      "asset_id": "asset-capture-protocol",
+      "path": "assets/capture-protocol.txt",
+      "role": "capture-protocol",
+      "media_type": "text/plain",
+      "bytes": 25,
+      "sha256": "7fa465c659b4d5cf51d18cd5d4a2af5a986aeb7b0d966cf32e06843561b39ae2"
+    },
+    {
+      "asset_id": "asset-annotation-protocol",
+      "path": "assets/annotation-protocol.txt",
+      "role": "annotation-protocol",
+      "media_type": "text/plain",
+      "bytes": 28,
+      "sha256": "5a2c0ae6741cb3f9a2b7b7cd45674a5cb02d439b51a4f22f0f5da7bac04af8dc"
+    },
+    {
+      "asset_id": "asset-metric-spec",
+      "path": "assets/metric-spec.txt",
+      "role": "metric-spec",
+      "media_type": "text/plain",
+      "bytes": 29,
+      "sha256": "44e85fcba238ddad56ede10d9fc74a0c307e412782e9a82640086c716407ffd4"
+    },
+    {
+      "asset_id": "asset-flatbed",
+      "path": "assets/flatbed.tif",
+      "role": "flatbed-master",
+      "media_type": "image/tiff",
+      "bytes": 22,
+      "sha256": "280af5f51ebfa7dd2e552b3c36cb1f9b6cbfef7c72f0b49af79bd0d5a6f5dc2e"
+    },
+    {
+      "asset_id": "asset-frame-zero",
+      "path": "assets/frame-0.dng",
+      "role": "phone-raw-frame",
+      "media_type": "image/x-adobe-dng",
+      "bytes": 24,
+      "sha256": "1538bb66ab99164a6a1d25da1829a5f7054993c3b2de4970d796aeea718ca3e1"
+    },
+    {
+      "asset_id": "asset-frame-zero-metadata",
+      "path": "assets/frame-0.json",
+      "role": "capture-result",
+      "media_type": "application/json",
+      "bytes": 29,
+      "sha256": "9dfc87005d3a02dc27d73cd523d9b41e0f60c0adcba64bb9441cc102259d425f"
+    }
+  ],
+  "source_groups": [
+    {
+      "source_group_id": "source-group-one",
+      "split": "dev-validation",
+      "membership_basis": ["singleton test print"],
+      "prints": [
+        {
+          "physical_print_id": "print-one",
+          "rights_basis": "synthetic test fixture",
+          "surface_finish": "glossy",
+          "print_process": "unknown",
+          "mounting": "loose",
+          "geometry_conditions": ["flat"],
+          "width_mm": 152.0,
+          "height_mm": 102.0,
+          "measurement_method": "caliper",
+          "content_tags": ["test-pattern"]
+        }
+      ]
+    }
+  ],
+  "captures": [
+    {
+      "acquisition_id": "acquisition-flatbed-one",
+      "physical_print_id": "print-one",
+      "comparison_block_id": "block-one",
+      "repeat_id": "repeat-one",
+      "attempt_index": 0,
+      "modality": "flatbed-reference",
+      "status": "accepted",
+      "accepted": true,
+      "started_utc": "2026-07-13T12:01:00Z",
+      "ended_utc": "2026-07-13T12:02:00Z",
+      "operator_id": "operator-one",
+      "device_snapshot_id": "scanner-one",
+      "software_build_id": "scanner-software-one",
+      "asset_ids": ["asset-flatbed"],
+      "protocol_deviations": []
+    },
+    {
+      "acquisition_id": "acquisition-raw-one",
+      "physical_print_id": "print-one",
+      "comparison_block_id": "block-one",
+      "repeat_id": "repeat-one",
+      "attempt_index": 0,
+      "modality": "phone-raw-burst",
+      "status": "accepted",
+      "accepted": true,
+      "started_utc": "2026-07-13T12:03:00Z",
+      "ended_utc": "2026-07-13T12:03:05Z",
+      "operator_id": "operator-one",
+      "device_snapshot_id": "phone-one",
+      "software_build_id": "kirsch-build-one",
+      "asset_ids": ["asset-frame-zero", "asset-frame-zero-metadata"],
+      "protocol_deviations": [],
+      "frames": [
+        {
+          "frame_id": "frame-one-zero",
+          "frame_index": 0,
+          "sensor_timestamp_ns": 1000,
+          "asset_ids": ["asset-frame-zero", "asset-frame-zero-metadata"]
+        }
+      ]
+    }
+  ],
+  "target_instances": [],
+  "annotations": []
+}

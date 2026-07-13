@@ -1,0 +1,21 @@
+# Android/Gradle
+.gradle/
+**/build/
+local.properties
+captures/
+
+# IDE
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Benchmark payloads are stored outside git by default.
+benchmark/data/**
+!benchmark/data/.gitkeep
+
+# Local toolchains
+.android-sdk/
+.jdk/

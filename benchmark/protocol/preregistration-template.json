@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.1.0",
+  "study_id": "replace-before-registration",
+  "registered_utc": null,
+  "frozen_artifacts": {
+    "capture_protocol_sha256": null,
+    "annotation_protocol_sha256": null,
+    "metric_spec_sha256": null,
+    "analysis_source_archive_sha256": null,
+    "analysis_config_sha256": null,
+    "candidate_build_sha256": null,
+    "comparator_versions": []
+  },
+  "population": {
+    "eligibility": [],
+    "exclusions": [],
+    "source_group_assignment": null,
+    "sample_size_justification": null
+  },
+  "analysis": {
+    "analysis_unit": "physical-print",
+    "dependence_cluster": "source-group",
+    "primary_endpoint": null,
+    "repeat_aggregation": null,
+    "practical_margin": null,
+    "confidence_interval": null,
+    "decision_rule": null,
+    "failure_rule": null,
+    "no_regression_endpoints": [],
+    "multiplicity_rule": null,
+    "random_seed": null,
+    "planned_unblinding": null
+  }
+}

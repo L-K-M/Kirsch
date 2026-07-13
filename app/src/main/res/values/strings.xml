@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kirsch Phase 0</string>
+    <string name="capture_title">KIRSCH / PHASE 0 CAPTURE</string>
+    <string name="unassigned_print_id">print-unassigned</string>
+    <string name="capture_burst">CAPTURE 5-FRAME BURST</string>
+    <string name="waiting_for_camera">Waiting for camera permission and preview surface</string>
+    <string name="capture_package_path">Validated package can be copied from:\n%1$s</string>
+    <string-array name="capture_modes">
+        <item>RAW / DNG</item>
+        <item>YUV / I420</item>
+    </string-array>
+</resources>

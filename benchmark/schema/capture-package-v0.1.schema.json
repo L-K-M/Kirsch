@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirsch.invalid/schema/capture-package-v0.1.schema.json",
+  "title": "Kirsch Camera2 capture package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "capture_id",
+    "print_id",
+    "created_utc",
+    "completed_utc",
+    "status",
+    "mode",
+    "requested_frame_count",
+    "received_frame_count",
+    "persisted_frame_count",
+    "camera",
+    "device",
+    "frames",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "capture_id": { "$ref": "#/$defs/id" },
+    "print_id": { "$ref": "#/$defs/id" },
+    "created_utc": { "type": "string", "format": "date-time" },
+    "completed_utc": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["accepted", "rejected", "failed", "aborted"] },
+    "mode": { "enum": ["raw-sensor", "yuv-420-888"] },
+    "requested_frame_count": { "type": "integer", "minimum": 0 },
+    "received_frame_count": { "type": "integer", "minimum": 0 },
+    "persisted_frame_count": { "type": "integer", "minimum": 0 },
+    "camera": { "type": "object" },
+    "device": { "type": "object" },
+    "frames": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/frame" }
+    },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "extensions": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "accepted" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "requested_frame_count": { "minimum": 1 },
+          "received_frame_count": { "minimum": 1 },
+          "persisted_frame_count": { "minimum": 1 },
+          "frames": { "minItems": 1 },
+          "errors": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role", "media_type", "bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "media_type": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame_index", "sensor_timestamp_ns", "width", "height", "format", "files"],
+      "properties": {
+        "frame_index": { "type": "integer", "minimum": 0 },
+        "sensor_timestamp_ns": { "type": "integer", "minimum": 1 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "enum": ["RAW_SENSOR", "I420"] },
+        "files": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/file" } },
+        "extensions": { "type": "object" }
+      }
+    }
+  }
+}

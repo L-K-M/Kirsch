@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirsch.invalid/schema/annotation-set-v0.1.schema.json",
+  "title": "Kirsch glare annotation set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "annotation_set_id",
+    "physical_print_id",
+    "target_asset_id",
+    "protocol_asset_id",
+    "status",
+    "blinded",
+    "reviewed",
+    "annotator_ids",
+    "coordinate_space",
+    "layers"
+  ],
+  "properties": {
+    "annotation_set_id": { "$ref": "#/$defs/id" },
+    "physical_print_id": { "$ref": "#/$defs/id" },
+    "target_asset_id": { "$ref": "#/$defs/id" },
+    "protocol_asset_id": { "$ref": "#/$defs/id" },
+    "status": { "enum": ["draft", "accepted", "rejected"] },
+    "blinded": { "type": "boolean" },
+    "reviewed": { "type": "boolean" },
+    "annotator_ids": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } },
+    "coordinate_space": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "origin", "x_axis", "y_axis", "unit", "orientation"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "origin": { "const": "top-left" },
+        "x_axis": { "const": "right" },
+        "y_axis": { "const": "down" },
+        "unit": { "const": "pixel" },
+        "orientation": { "const": "encoded-before-exif" }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "asset_id"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "surface-glare-hotspot",
+              "surface-glare-sheen",
+              "glare-ambiguous",
+              "saturation-any-channel",
+              "saturation-all-channels",
+              "legitimate-highlight",
+              "geometry"
+            ]
+          },
+          "asset_id": { "$ref": "#/$defs/id" },
+          "extensions": { "type": "object" }
+        }
+      }
+    },
+    "extensions": { "type": "object" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    }
+  }
+}
