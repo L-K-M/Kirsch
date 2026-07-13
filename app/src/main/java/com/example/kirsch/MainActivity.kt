@@ -27,6 +27,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
     private companion object {
         const val CAMERA_PERMISSION_REQUEST = 100
         const val EXPORT_DOCUMENT_REQUEST = 101
+        const val STATE_PENDING_EXPORT = "pendingExport"
     }
 
     private lateinit var textureView: TextureView
@@ -42,6 +43,12 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // The SAF picker can outlive this Activity instance (rotation,
+        // process death); the selected packages must survive recreation or
+        // onActivityResult lands on an instance with nothing to export.
+        pendingExport = savedInstanceState?.getStringArrayList(STATE_PENDING_EXPORT)
+            ?.map(::File)
+            ?: emptyList()
         buildUi()
         controller = Camera2BurstController(this, textureView, this)
         modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -120,15 +127,27 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList(
+            STATE_PENDING_EXPORT,
+            ArrayList(pendingExport.map(File::getAbsolutePath)),
+        )
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != EXPORT_DOCUMENT_REQUEST) return
         val destination = data?.data
         val sources = pendingExport
         pendingExport = emptyList()
-        if (resultCode != RESULT_OK || destination == null || sources.isEmpty()) return
+        if (resultCode != RESULT_OK || destination == null) return
+        if (sources.isEmpty()) {
+            onStatus(getString(R.string.export_failed, "export selection was lost"))
+            return
+        }
         onStatus(getString(R.string.export_running))
-        Thread {
+        Thread({
             val result = runCatching {
                 contentResolver.openOutputStream(destination)?.use { output ->
                     CapturePackageZipper.zip(sources, output)
@@ -153,7 +172,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
                     },
                 )
             }
-        }.start()
+        }, "capture-export").start()
     }
 
     private fun capturePackages(): List<File> {
