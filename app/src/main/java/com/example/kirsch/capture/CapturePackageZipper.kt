@@ -18,14 +18,20 @@ object CapturePackageZipper {
     /**
      * Writes each source directory as a top-level folder in the zip.
      * Entry order is deterministic (sorted by path) and in-progress
-     * `.partial` files are excluded.
+     * `.partial` files are excluded. Duplicate directories are deduplicated
+     * by canonical path; distinct directories sharing a name are rejected
+     * because their zip entries would collide.
      */
     fun zip(sources: List<File>, output: OutputStream): Result {
+        val bases = sources.map(File::getCanonicalFile).distinctBy(File::getPath)
+        val collidingNames = bases.groupBy(File::getName).filterValues { it.size > 1 }.keys
+        require(collidingNames.isEmpty()) {
+            "Source directories must have unique names; duplicates: $collidingNames"
+        }
         var entries = 0
         var bytes = 0L
         ZipOutputStream(output.buffered()).use { zip ->
-            for (source in sources.sortedBy(File::getName)) {
-                val base = source.canonicalFile
+            for (base in bases.sortedBy(File::getName)) {
                 val files = base.walkTopDown()
                     .filter { it.isFile && !it.name.endsWith(".partial") }
                     .sortedBy { it.relativeTo(base).invariantSeparatorsPath }

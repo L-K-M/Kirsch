@@ -52,6 +52,31 @@ class CapturePackageZipperTest {
     }
 
     @Test
+    fun duplicateDirectoryIsDeduplicatedAndCollidingNamesAreRejected() {
+        val root = Files.createTempDirectory("zipper").toFile()
+        try {
+            val a = root.resolve("capture-a").apply { mkdirs() }
+            a.resolve("capture.json").writeText("{\"id\":\"a\"}")
+
+            val out = ByteArrayOutputStream()
+            val result = CapturePackageZipper.zip(listOf(a, a), out)
+            assertEquals(1, result.entryCount)
+
+            val otherParent = root.resolve("other").apply { mkdirs() }
+            val clash = otherParent.resolve("capture-a").apply { mkdirs() }
+            clash.resolve("capture.json").writeText("{\"id\":\"clash\"}")
+            try {
+                CapturePackageZipper.zip(listOf(a, clash), ByteArrayOutputStream())
+                org.junit.Assert.fail("expected IllegalArgumentException for colliding names")
+            } catch (expected: IllegalArgumentException) {
+                // entries would collide inside the zip
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun emptySourcesProduceEmptyZip() {
         val out = ByteArrayOutputStream()
         val result = CapturePackageZipper.zip(emptyList(), out)

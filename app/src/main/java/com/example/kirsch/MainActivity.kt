@@ -135,13 +135,16 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
                 } ?: error("Could not open the selected export destination")
             }
             runOnUiThread {
+                // The export intentionally finishes even if the Activity is
+                // recreated mid-write; only the status update is dropped.
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
                     onSuccess = {
                         onStatus(
                             getString(
                                 R.string.export_done,
                                 it.entryCount,
-                                it.byteCount / (1024 * 1024),
+                                it.byteCount / (1024.0 * 1024.0),
                             ),
                         )
                     },

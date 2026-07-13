@@ -89,7 +89,12 @@ def audit(cap_dir):
             # results regardless of mode. They only harm the image when AWB
             # is OFF and the values are actually applied; under auto/locked
             # AWB they are informational noise.
-            if metas[0].get("awb_mode") == 0:
+            awb_modes = {m.get("awb_mode") for m in metas}
+            if len(awb_modes) > 1:
+                notes.append(
+                    f"awb_mode inconsistent across frames: {sorted(str(v) for v in awb_modes)}"
+                )
+            if awb_modes == {0}:
                 findings.append(
                     f"implausible WB gains {gains} (green split {split * 100:.0f}%) "
                     "applied with AWB off: unrecoverable color cast; prefer AWB lock"

@@ -11,7 +11,7 @@
     <string name="export_all">All packages (%1$d)</string>
     <string name="export_nothing">No completed capture packages to export</string>
     <string name="export_running">Exporting…</string>
-    <string name="export_done">Exported %1$d files (%2$d MB)</string>
+    <string name="export_done">Exported %1$d files (%2$.1f MB)</string>
     <string name="export_failed">Export failed: %1$s</string>
     <string-array name="capture_modes">
         <item>RAW / DNG</item>
