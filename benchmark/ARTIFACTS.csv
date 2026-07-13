@@ -5,3 +5,5 @@ Android Gradle Plugin,8.7.3,Android build plugin,https://android.googlesource.co
 Kotlin Gradle Plugin,2.0.21,Kotlin compiler/plugin,https://github.com/JetBrains/kotlin,Apache-2.0,build-time dependency,Resolve from Maven/Gradle plugin portal
 JUnit,4.13.2,JVM unit tests,https://github.com/junit-team/junit4,EPL-1.0,test-only dependency,Not packaged in APK
 Android platform APIs,35,compile SDK and Camera2 runtime API,https://developer.android.com/,Android SDK license,not redistributed by repository,Install through sdkmanager
+NumPy,2.x,offline capture analysis (analyze_capture.py),https://github.com/numpy/numpy,BSD-3-Clause,not bundled,Desk analysis only; never ships in app
+opencv-python-headless,4.x/5.x,offline capture analysis (analyze_capture.py),https://github.com/opencv/opencv-python,Apache-2.0,not bundled,Desk analysis only; wheel bundles OpenCV core

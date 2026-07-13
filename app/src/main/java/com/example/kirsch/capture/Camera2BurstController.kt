@@ -625,17 +625,37 @@ class Camera2BurstController(
         }
         val gains = locked.get(CaptureResult.COLOR_CORRECTION_GAINS)
         val transform = locked.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
-        if (selected.supportsManualPostProcessing && gains != null && transform != null) {
-            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-            builder.set(
-                CaptureRequest.COLOR_CORRECTION_MODE,
-                CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+        val gainsPlausible = gains != null && transform != null &&
+            WhiteBalanceStrategy.gainsPlausible(
+                gains.red,
+                gains.greenEven,
+                gains.greenOdd,
+                gains.blue,
             )
-            builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
-            builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
-        } else {
-            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-            builder.set(CaptureRequest.CONTROL_AWB_LOCK, selected.awbLockAvailable)
+        when (
+            WhiteBalanceStrategy.select(
+                selected.awbLockAvailable,
+                selected.supportsManualPostProcessing,
+                gainsPlausible,
+            )
+        ) {
+            WhiteBalanceStrategy.Mode.LOCK -> {
+                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                builder.set(CaptureRequest.CONTROL_AWB_LOCK, true)
+            }
+            WhiteBalanceStrategy.Mode.MANUAL_REPLAY -> {
+                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                builder.set(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+                )
+                builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
+                builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+            }
+            WhiteBalanceStrategy.Mode.AUTO -> {
+                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                builder.set(CaptureRequest.CONTROL_AWB_LOCK, selected.awbLockAvailable)
+            }
         }
         val shadingModes = selected.characteristics.get(
             CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES,
