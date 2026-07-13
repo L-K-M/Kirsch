@@ -1,10 +1,14 @@
 # Capture audit: HMD Fusion, 2026-07-13
 
-Second device-matrix entry. Evidence base is intentionally thin — one
-YUV capture manifest (`capture-20260713t191440699z-c9834f8c`) with the
-camera characteristics and a single frame's metadata, exported through the
-new in-app SAF zip path — so this records capabilities and first
-observations, not qualification.
+Second device-matrix entry. The initial evidence was one YUV capture
+manifest (`capture-20260713t191440699z-c9834f8c`) with the camera
+characteristics and a single frame's metadata, exported through the new
+in-app SAF zip path. A same-day owner-run follow-up (end of this report)
+audited the full YUV package plus a RAW package
+(`capture-20260713t191431694z-29656dcb`) and ran the fusion baseline —
+qualifying capture cadence in both modes and reproducing the fusion
+estimator-optimality result on this device. `DngCreator` decode/fusion,
+the cold-burst series, and the batch soak remain open.
 
 ## Device
 
@@ -59,9 +63,10 @@ open Phase 0 item).
 
 ## Follow-up: owner-run local analysis (same day)
 
-The device owner ran `analyze_capture.py` locally (macOS venv) against two
-full packages; numbers below are transcribed from that session's output
-and the uploaded fuse artifacts.
+The device owner ran `analyze_capture.py` locally (macOS venv) against the
+same two packages named above — the full YUV package (audit + fuse) and
+the RAW package (audit only) — with numbers transcribed from that
+session's output and the uploaded fuse artifacts.
 
 - **RAW works on this device.** A `raw-sensor` capture
   (`capture-20260713t191431694z-29656dcb`) audited clean: 5/5 frames,
