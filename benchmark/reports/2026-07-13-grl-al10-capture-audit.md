@@ -72,3 +72,32 @@ and Play AI Packs are unavailable, and LiteRT NPU delegates do not cover
 Kirin (GPU/CPU paths only). Pose priors fall back to IMU sensor fusion and
 model delivery needs a non-Play channel if this device class remains a
 target.
+
+## Follow-up: fixed-build captures (same day)
+
+Two further glare captures (94f1cc07, 6b0e39e8) taken with the
+`WhiteBalanceStrategy` build confirm the fix in the field: per-frame
+metadata shows `awb_mode=AUTO` with the lock requested and
+`awb_state=LOCKED`, and color is correct. The HAL still reports the same
+implausible gain pattern in results under locked AWB, confirming that
+result-reported gains are untrustworthy on this device regardless of mode
+(the audit tool now distinguishes the applied-with-AWB-off defect from the
+informational case).
+
+Fusion results on the two captures (plus two pre-fix glare captures,
+d1a36663 and c9aa5587): with real sweep motion (40–217px center shift),
+the per-pixel minimum's residual saturated area equals the
+saturated-in-every-frame floor exactly in both measurable cases
+(2.00% → 1.30% against a 1.30% floor; 0.073% → 0.034% against a 0.034%
+floor) — the estimator recovers everything the capture geometry allows.
+The residual glare core is a capture problem, not an estimator problem:
+the sweep displacement must exceed the specular blob's extent. Guidance
+for the next round: wider/tilted sweeps or more frames, and evaluate glare
+metrics inside print-region masks (whole-frame percentages are diluted by
+background, and pre-WB-fix captures need peak-channel rather than
+channel-mean detection because the cast suppresses blue).
+
+The capture app now includes a Storage Access Framework zip export
+(`CapturePackageZipper`) so packages can leave devices whose
+`Android/data` is not browsable — previously a blocker for qualifying any
+secondary device in the matrix.

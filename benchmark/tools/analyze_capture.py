@@ -51,6 +51,7 @@ def audit(cap_dir):
     manifest, frames = load_package(cap_dir)
     metas = [f["meta"] for f in frames]
     findings = []
+    notes = []
 
     products = [p for p in (_exposure_product(m) for m in metas) if p is not None]
     if len(products) < len(metas):
@@ -84,10 +85,25 @@ def audit(cap_dir):
         gains_in_range = all(0.5 <= v <= 8 for v in gains)
         split = abs(g_even - g_odd) / max(g_even, g_odd) if gains_in_range else 1.0
         if split > 0.05 or not gains_in_range:
-            findings.append(
-                f"implausible WB gains {gains} (green split {split * 100:.0f}%): "
-                "likely HAL-misreported values replayed with AWB off; prefer AWB lock"
-            )
+            # Field evidence (GRL-AL10): the HAL reports junk gains in
+            # results regardless of mode. They only harm the image when AWB
+            # is OFF and the values are actually applied; under auto/locked
+            # AWB they are informational noise.
+            awb_modes = {m.get("awb_mode") for m in metas}
+            if len(awb_modes) > 1:
+                notes.append(
+                    f"awb_mode inconsistent across frames: {sorted(str(v) for v in awb_modes)}"
+                )
+            if awb_modes == {0}:
+                findings.append(
+                    f"implausible WB gains {gains} (green split {split * 100:.0f}%) "
+                    "applied with AWB off: unrecoverable color cast; prefer AWB lock"
+                )
+            else:
+                notes.append(
+                    f"HAL reports implausible informational WB gains {gains} under "
+                    "auto/locked AWB; do not trust result-reported gains on this device"
+                )
 
     focus = {m.get("lens_focus_distance_diopters") for m in metas}
     if len(focus) > 1:
@@ -109,6 +125,7 @@ def audit(cap_dir):
         "inter_frame_ms": [round(d, 1) for d in deltas],
         "exposure_gain_products": products,
         "findings": findings,
+        "notes": notes,
     }
     print(json.dumps(report, indent=2))
     return 1 if findings else 0
