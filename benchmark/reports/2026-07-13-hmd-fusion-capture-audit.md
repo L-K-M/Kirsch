@@ -56,3 +56,29 @@ open Phase 0 item).
    and radiometric verification across all frames.
 3. The standard cold-burst series and a sustained batch soak per the
    device-matrix minimum first pass.
+
+## Follow-up: owner-run local analysis (same day)
+
+The device owner ran `analyze_capture.py` locally (macOS venv) against two
+full packages; numbers below are transcribed from that session's output
+and the uploaded fuse artifacts.
+
+- **RAW works on this device.** A `raw-sensor` capture
+  (`capture-20260713t191431694z-29656dcb`) audited clean: 5/5 frames,
+  steady 33.3ms cadence — same as YUV — and a constant exposure×gain
+  product. `DngCreator`-produced packages persist and pass the audit;
+  decoding/fusing the DNG payloads is still pending (`fuse` is I420-only
+  today), so "DNG opens in third-party tools" remains unverified.
+- **YUV fusion reproduces the estimator-optimality result on a second
+  device:** min-composite residual saturation 0.9747% equals the
+  saturated-in-every-frame floor (0.9747%); single frame 1.40%.
+  Registration: 347–427 MAGSAC++ inliers, 1.40–1.55px mean residual,
+  36.8–74.9px center shifts. As on the GRL-AL10 captures, the remaining
+  glare core reflects sweep amplitude, not estimator behavior.
+- Frames show mild motion softness (20ms exposure during the sweep;
+  rolling-shutter skew 20.5ms) — on manual-sensor devices the burst
+  exposure ceiling is controllable, so a shorter-exposure sweep profile is
+  worth testing.
+
+Remaining next steps: decode/fuse the RAW burst (add DNG support to the
+analysis tool), cold-burst series, and batch soak.

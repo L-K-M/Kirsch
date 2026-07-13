@@ -35,7 +35,7 @@ A second device entered the matrix via the in-app zip export: an HMD Fusion (LEV
 
 The following remain unmeasured:
 
-- stream combination success and RAW cadence on a RAW-capable phone (an HMD Fusion with RAW/manual/burst is now in the matrix, but only its YUV path has been observed)
+- RAW payload verification: HMD Fusion RAW bursts persist and audit clean at 33.3ms cadence, but the DNG files have not been decoded or fused (analysis tool is I420-only)
 - OEM timestamp equality and `DngCreator` interoperability
 - logical-camera switching behavior beyond the single audited device
 - ImageReader buffer pressure and partial/failure behavior
@@ -53,7 +53,7 @@ Fill one row per physical camera/device/OS build. Do not merge results across up
 | Device instance | Model/build | Camera ID | Hardware level | RAW | Manual sensor/post | Burst capability | Preview+RAW | Preview+YUV | 5-frame cadence | Drops | Peak memory | Thermal soak | DNG opens | Notes |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|
 | owner-primary | HUAWEI GRL-AL10, Kirin 9010, Android 12 / API 31, build 104.2.0.201C00 | 0 (bursts on physical 2) | LIMITED | no | no / yes | no | n/a (no RAW) | yes, 3344x3072 I420 | 42ms (~24fps) x10 bursts; 50-53ms x1 | 0 in 11 bursts | pending | pending | n/a (no RAW) | AE/AWB lock available; AE lock swaps exposure/ISO at constant product; WB replay defect found and fixed; no GMS (no ARCore/ML Kit); see 2026-07-13 audit report |
-| owner-secondary | HMD Fusion (Nighthawk), Qualcomm, Android 15 / API 35, build 00WW_2_83B | 0 | LEVEL_3 | yes | yes / yes | yes | pending | yes, 4000x3000 I420 | 33.3ms (30fps) x1 burst | 0 in 1 burst | pending | pending | pending | Manual-sensor exposure path engaged (AE off + explicit values); AWB lock honored; HAL reports plausible gains and real CCM; "3A lock timed out" warning is expected on the manual-sensor path (predicate fix candidate); RAW mode not yet exercised; see 2026-07-13 HMD report |
+| owner-secondary | HMD Fusion (Nighthawk), Qualcomm, Android 15 / API 35, build 00WW_2_83B | 0 | LEVEL_3 | yes | yes / yes | yes | yes, 33.3ms (owner-run audit) | yes, 4000x3000 I420 | 33.3ms (30fps), RAW and YUV | 0 in 2 bursts | pending | pending | packages persist + audit clean; DNG decode not yet verified | Manual-sensor exposure path engaged (AE off + explicit values); AWB lock honored; HAL reports plausible gains and real CCM; "3A lock timed out" warning is expected on the manual-sensor path (predicate fix candidate); YUV fusion reproduces min==floor optimality; see 2026-07-13 HMD report |
 
 Minimum first pass:
 
