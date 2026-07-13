@@ -94,7 +94,7 @@ Three generations of progress:
 - **Google's own lineage is now open:** HDR+ (SIGGRAPH Asia 2016) and **Handheld Multi-Frame Super-Resolution** (SIGGRAPH 2019, the Pixel's Super Res Zoom) both have peer-reviewed open reimplementations (IPOL 2021/2023). Handheld MFSR fuses a RAW burst via anisotropic kernel regression with per-pixel robustness masks — **simultaneously demosaicing, denoising, and super-resolving**. Its robustness-mask machinery is exactly where a glare/outlier term plugs in. This is the gold-standard merge core for a scanner: the multi-frame burst is precisely the input multi-frame SR needs. The resolution cap becomes resolution *upside*.
 - **Deep burst SR** (DBSR → BIPNet → Burstormer → 2024-26 Mamba/one-step-diffusion variants): NTIRE 2025's efficiency track proved a **3.3M-param align-then-restore network runs in ~64ms** (0.28 TFLOPs); DRIFT (2026) runs an 11-frame 12MP NAFNet burst pipeline in **3.2s on a Snapdragon 8 Elite NPU**. Plain NAFNet-class CNNs beat exotic architectures for mobile.
 - **Alignment is essentially solved for planar targets:** XFeat (CPU real-time, Apache-2.0) or open-retrained SuperPoint + **LightGlue** (Apache-2.0) matches → OpenCV **MAGSAC++** (`USAC_MAGSAC`) homography — near-failure-free, milliseconds, glare blobs simply become outliers. Dense residual flow for page curl: **SEA-RAFT** (BSD-3) / NeuFlow v2 (>20 FPS on Jetson-class hardware) replace the 2016 grid-flow approximation. **RoMa v2** (MIT) serves as an offline teacher/cloud fallback, and its per-pixel certainty doubles as merge weight maps.
-- **Platform unblocked:** CameraX 1.5 (Nov 2025) exposes **RAW/DNG capture** (`OUTPUT_FORMAT_RAW_JPEG`); Camera2 interop provides AE/AWB lock and `captureBurst`. Merging in linear RAW — impossible for a third-party app in 2016 — is now the right default on Android. (iOS requires a different capture design; see §3.5.)
+- **Platform unblocked:** CameraX 1.5 (Nov 2025) exposes **RAW/DNG capture** (`OUTPUT_FORMAT_RAW_JPEG`); Camera2 interop provides AE/AWB lock and `captureBurst`. Merging in linear RAW — impossible for a third-party app in 2016 — is now the right default.
 
 ### 3.3 Boundary detection, cropping, rectification
 
@@ -103,7 +103,7 @@ Three generations of progress:
 - **Document dewarping matured:** DocUNet (2018) → DewarpNet (2019) → DocTr++ (handles partially-visible documents) → **UVDoc** (2023, small grid-based net, most on-device-friendly) → **DocRes** (CVPR 2024, **MIT license**, unifies dewarp/deshadow/appearance/deblur) → diffusion dewarpers (2025). Curled and dog-eared prints — a documented PhotoScan failure — are directly addressed; run once per capture on the NPU, not per frame.
 - **Rectification correctness:** 4-point homography plus **Zhang–He closed-form focal-length/aspect-ratio recovery**, then snap to standard print ratios (3.5×5, 4×6, 5×7, 8×10, square). Naive "stretch quad to rectangle" subtly distorts aspect ratio — a visible quality bug in the 2016 generation.
 - **Sub-pixel corners matter at modern resolution:** the NN detects corners at ~224px but the crop applies to a 12–48MP frame; a 1px error at inference scale is 25–100px at full res. Full-res patch refinement (classical `cornerSubPix` or the ECCV 2024 learned sub-pixel module) is mandatory for archival crops.
-- **Platform floor:** ML Kit Document Scanner (2024) and Apple's `VNDetectDocumentSegmentationRequest` give free on-device detection — good for A/B baselining, but single-document, document-trained, and undifferentiated. Don't build the core on them.
+- **Platform floor:** ML Kit Document Scanner (2024) gives free on-device detection — good for A/B baselining, but single-document, document-trained, and undifferentiated. Don't build the core on it.
 
 ### 3.4 Restoration & enhancement (the value-add PhotoScan never had)
 
@@ -117,25 +117,17 @@ Users' end goal is a *restored image*, not a faithful scan of a faded print.
 - **Colorization:** DDColor (Apache-2.0) for one-tap auto color; diffusion-controlled colorization (text/stroke hints) as premium. **Always labeled as interpretive, never bundled into "restore."**
 - **Hallucination is now a named research problem.** The product consequence: a default **archival mode** restricted to non-generative ops (geometry, glare, descreen, denoise, color), an opt-in **enhance mode** for generative work, C2PA content credentials distinguishing the two, and the untouched master scan always preserved.
 
-### 3.5 On-device ML and camera platform (2026)
+### 3.5 On-device ML and camera platform (Android, 2026)
 
-**Android:**
+*(Scope note: the target platform is Android only. An iOS feasibility pass was done — iOS would require a structurally different capture module since full-res RAW bursts don't exist there — but iOS is out of scope by product decision; those findings live in this repo's PR history should it ever be revisited.)*
+
 - **Runtimes:** LiteRT NPU acceleration went GA (Jan 2026): NPU "up to 100× faster than CPU, 10× faster than GPU," zero-copy `AHardwareBuffer` → TensorBuffer camera input, vendor NPU delivery via Play "AI Packs." ExecuTorch 1.0 (Oct 2025) exports PyTorch research checkpoints straight to phones — ideal for prototyping.
 - **Measured budgets:** Real-ESRGAN-x4 (1.2M params): 0.68ms on Snapdragon 8 Elite Gen 5, 2.45ms on mid-range 7 Gen 4. 5–20M-param CNNs land in tens of ms on NPU. Preview-loop guidance models fit 33ms frames on mid-range GPUs. Full 12MP multi-frame fusion: ~3s (DRIFT precedent). INT8 quantization: 2–4× speedup, <1% accuracy loss.
-- **Camera:** CameraX 1.5 (RAW/DNG, Feature Groups, ZSL) + Camera2 interop for AE/AWB lock and true `captureBurst`.
-- **Pose:** ARCore is alive (1.5x releases through 2026); its VIO provides 6-DoF pose priors for registration. Abstract the pose provider (ARCore → Jetpack XR migration path; rotation-vector sensor fusion fallback).
+- **Camera:** CameraX 1.5 (RAW/DNG, Feature Groups, ZSL) + Camera2 interop for AE/AWB lock and true `captureBurst`. RAW capability (`REQUEST_AVAILABLE_CAPABILITIES_RAW`) is not universal across the fleet — a YUV fallback path is mandatory, and the RAW-capable share of the installed base needs a device-matrix survey (§11).
+- **Pose:** ARCore is alive (1.5x releases through 2026); its VIO provides 6-DoF pose priors for registration. Abstract the pose provider (ARCore → Jetpack XR migration path; rotation-vector sensor fusion fallback on non-ARCore devices).
+- **Memory/thermal:** process bursts at 12MP working resolution, tile anything larger, pool buffers; drive a degradation ladder (reduce preview inference rate → shorten sweep → pause batch processing) off the Android Thermal API.
 
-**iOS (researched July 2026 — materially different capture design required):**
-- **Full-res RAW bursts do not exist on iOS.** Bracketed capture is capped at ~3–5 frames and *overrides* manual AE/AWB locks; 48MP ProRAW takes seconds per shot; 24MP output is itself a multi-frame Photonic-Engine fusion. The viable multi-frame path is **sequential 12MP captures** under the iOS 17+ responsive-capture stack (zero shutter lag, overlapping captures via `isResponsiveCaptureEnabled`, prepared photo settings), or a locked-exposure 4K video stream — with an optional single 24/48MP "detail anchor" frame. The iOS capture module diverges structurally from Android's and must be specified separately from day one.
-- **Avoid iOS 17 deferred photo processing** in the scan flow: it routes final processing through the user's Photo Library and never returns the full-quality buffer to the app. Use `.balanced`/`.speed` with direct `AVCapturePhoto` delivery.
-- **AE/AWB/AF fully lockable** (`setExposureModeCustom`, `setWhiteBalanceModeLocked`), and per-frame **camera intrinsics delivery** (`isCameraIntrinsicMatrixDeliveryEnabled`) is uniform across devices — a registration-prior advantage Android can't match uniformly. ARKit's `captureHighResolutionFrame()` returns pose-tagged 12MP stills mid-session (but no ProRAW/48MP during an ARSession).
-- **ANE inference is a strength:** 1–20M-param vision models run in 1–40ms on A16–A19; Photoroom's ~10M-param production segmentation runs 27 FPS on A17 Pro. Mature porting path: coremltools 9.0 (torch.export, INT8/palettization) or ExecuTorch's Core ML backend. Vision framework provides free document segmentation at camera rate, lens-smudge detection (iOS 26), and structured document OCR (iOS 26) for photo-back capture.
-- **Memory/thermal ceilings:** ~2.1GB jetsam limit on 4GB iPhones (~6.1GB on 16/17 Pro Max) — process bursts at 12MP, tile larger work, pool IOSurface-backed buffers; drive a thermal-degradation ladder off `ProcessInfo.thermalState`.
-- **Model delivery:** Background Assets with Apple-Hosted asset packs (iOS 26; 200GB hosting included; On-Demand Resources is deprecated) — symmetric with Play AI Packs.
-
-**Cross-platform:** no production KMP camera/pixel pipelines exist; the proven pattern (Snap's Djinni-bridged C++ core, Photoroom's PhotoGraph engine) is **native capture + native inference runtimes + a shared C++ core** for fusion/geometry/quality-gating math. KMP is fine for orchestration/state only.
-
-**Privacy-credible cloud offload:** confidential-computing GPUs (H100/H200 TEEs, ~1–7% overhead) with remote attestation — the Google Private AI Compute / Apple PCC pattern. Send only the fused image, never the raw burst.
+**Privacy-credible cloud offload:** confidential-computing GPUs (H100/H200 TEEs, ~1–7% overhead) with remote attestation — the Google Private AI Compute pattern. Send only the fused image, never the raw burst.
 
 ### 3.6 Capture UX state of the art
 
@@ -144,7 +136,7 @@ Users' end goal is a *restored image*, not a faithful scan of a faded print.
 - **Live WYSIWYG fused preview** (Live HDR+ 2019, Adobe Project Indigo 2025, Scaniverse): progressively composite the glare-free result in the viewfinder. The user's mental model becomes *"sweep until the preview looks clean."*
 - **Ghost-overlay alignment for ordinary users is proven** (Pixel 9 "Add Me").
 - **Batch-first archival workflows** (Photomyne album pages; Epson FastFoto's 1 photo/sec and automatic back-side capture): continuous capture queue, background fusion, batch review.
-- **Back-of-photo metadata:** handwriting OCR is commercially mature (and free on-device via iOS 26 `RecognizeDocumentsRequest`); visual date-estimation models exist. Scan the back, OCR "1962, Grandma at the lake," set EXIF date with a confirm step.
+- **Back-of-photo metadata:** handwriting OCR is commercially mature (ML Kit text recognition on-device for casual cases; specialized HTR models for messy archival writing); visual date-estimation models exist. Scan the back, OCR "1962, Grandma at the lake," set EXIF date with a confirm step.
 - **Accessibility:** the same real-time state machine, exposed as spoken prompts + haptics (Seeing AI / iOS 18 Magnifier patterns), makes the app usable eyes-free at near-zero marginal cost. (Audio guidance phrasing needs doctrine-of-equivalents review — §11.)
 
 ### 3.7 Color fidelity and physical scale (the substance behind "archival")
@@ -154,11 +146,11 @@ The standards flatbeds are judged by are public and numeric — **FADGI 3rd ed. 
 What the evidence supports:
 
 - **Phone sensors are colorimetrically adequate** (Sensitivity Metamerism Index ~86, comparable to DSLRs; mean ΔE2000 ~1.2–1.3 achievable from RAW with a ColorChecker-derived matrix under known light). The bottleneck is the *unknown room illuminant* and the vendor's "pleasing" render, not silicon.
-- **The colorimetric backbone is free:** DNG dual-illuminant calibration metadata (ColorMatrix1/2, ForwardMatrix1/2, per-unit CalibrationTransform) is exposed by Android Camera2 and embedded in Apple ProRAW. Render colorimetrically (linear working space, no look table, no S-curve) — never derive the archival file from the tone-mapped HEIC/JPEG.
+- **The colorimetric backbone is free:** DNG dual-illuminant calibration metadata (ColorMatrix1/2, ForwardMatrix1/2, per-unit CalibrationTransform) is exposed as Camera2 static metadata (`SENSOR_COLOR_TRANSFORM1/2`, `SENSOR_FORWARD_MATRIX1/2`, `SENSOR_CALIBRATION_TRANSFORM1/2`). Render colorimetrically (linear working space, no look table, no S-curve) — never derive the archival file from the vendor's tone-mapped JPEG.
 - **On-device illuminant estimation is solved to ~2° angular error at megabyte scale:** C5 (ICCV 2021, ~2MB, ~7ms GPU) and CCMNet (2025, ~1MB — consumes the same DNG CCMs as a camera fingerprint). Verify licenses before shipping.
 - **Print scanning has two calibration anchors generic photography lacks:** (a) *paper-white borders* — near-neutral by manufacture (use as a prior with yellowing-aware confidence, not absolute truth); (b) *flash-dominant capture* — the torch is a factory-known illuminant; the ICCP 2016 flash/no-flash closed-form gives per-pixel white balance under arbitrary mixed lighting.
 - **Radiometric consistency rules for fusion:** lock AE/AWB/focus across the fused burst; keep every fused stack in a *single illumination state* (all-torch or all-ambient); flash frames are per-pixel flash/ambient mixtures — use flash/ambient pairs for illuminant estimation, never naively min-composite them with ambient frames.
-- **Absolute physical size is unrecoverable from a single unaided image** — only aspect ratio is. Honest DPI requires: quad + intrinsics → true aspect ratio; coarse absolute scale from ARKit/ARCore anchors (sub-cm published accuracy, though under-validated at 20–40cm print distance) or monocular metric depth (Apple Depth Pro, open source) as a prior; **snap to standard print sizes** (3.5×5, 4×6, 5×7, 8×10) with UI confirmation; reference-object/target override. Then write real `XResolution`/`YResolution`/`ResolutionUnit` — scanner-style metadata that downstream genealogy/archive tools actually consume. Photomyne exports a meaningless default 72dpi; PhotoScan writes nothing. Nobody does this correctly.
+- **Absolute physical size is unrecoverable from a single unaided image** — only aspect ratio is. Honest DPI requires: quad + intrinsics → true aspect ratio; coarse absolute scale from ARCore plane anchors (published accuracy is sub-cm-to-cm, but mostly evaluated at ≥0.5m — validate at the 20–40cm print-capture distance) or monocular metric depth (Apple's open-source Depth Pro model) as a prior; **snap to standard print sizes** (3.5×5, 4×6, 5×7, 8×10) with UI confirmation; reference-object/target override. Then write real `XResolution`/`YResolution`/`ResolutionUnit` — scanner-style metadata that downstream genealogy/archive tools actually consume. Photomyne exports a meaningless default 72dpi; PhotoScan writes nothing. Nobody does this correctly.
 - **Honest ceilings:** under low-CRI narrow-band LEDs, metameric failure is uncorrectable in software (detect it and prompt for flash/daylight); the a* (red-green) axis is systematically weakest on phones; and 12MP over a 4×6 print is ~750 ppi *sampling* but handheld blur/demosaic cut delivered SFR/MTF well below that. Claims must be **measured, per-scan numbers** — "up to N ppi measured," not "600-DPI-equivalent."
 
 **Product consequence — a two-tier honesty model:** default mode claims "accurate color" (realistic target-free performance: ΔE00 ~3–7, consistent with published smartphone colorimetry); an **archival mode** with a manufactured reference target in-frame (ColorChecker Passport, or GoldenThread object-level target which adds rulers for exact scale) builds a per-session profile and **reports measured ΔE per scan** — a proof mechanism flatbed software rarely surfaces, flipping our weakest claim into a differentiator. Only archival mode references FADGI star levels, phrased as "measured to X-star color/tone aims."
@@ -190,18 +182,18 @@ The 2026 market's negative space, from review mining:
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ CAPTURE (live loop, 30 FPS on preview frames)                       │
-│  Android: CameraX 1.5 + Camera2 interop (RAW/DNG, AE/AWB lock, ZSL) │
-│  iOS: AVFoundation sequential 12MP responsive captures (+ optional  │
-│    24/48MP detail anchor); per-frame intrinsics; direct delivery    │
-│  Pose priors: ARCore VIO / ARKit ARFrames (abstracted provider)     │
+│  CameraX 1.5 + Camera2 interop (RAW/DNG, AE/AWB lock, ZSL,          │
+│    captureBurst); YUV fallback on non-RAW devices                   │
+│  Pose priors: ARCore VIO (sensor-fusion fallback)                   │
 │  Guidance nets (NPU, zero-copy): corner-keypoint CNN (~96-224px)    │
-│  FREEHAND SWEEP capture (patent-constrained design, §6):            │
-│    continuous frames during a slow sweep; auto-capture gated on     │
-│    focus/stability/framing (NOT glare thresholds)                   │
+│  FREEHAND SWEEP capture, fingerprint-enrollment style (§6):         │
+│    continuous frames during a slow sweep; progress ring driven by   │
+│    pose/coverage diversity; frames accepted on focus/stability/     │
+│    framing gates (NOT glare thresholds)                             │
 │  Single illumination state per fused stack (all-torch OR ambient)   │
-│  Output: 5-15 frames + poses + intrinsics                           │
+│  Output: 5-15 frames + poses + metadata                             │
 ├─────────────────────────────────────────────────────────────────────┤
-│ ALIGN (per burst, seconds, on-device — shared C++ core)             │
+│ ALIGN (per burst, seconds, on-device — C++/NDK core)                │
 │  XFeat / open-SuperPoint+LightGlue matches                          │
 │  → MAGSAC++ homography (planar prior; glare = outliers)             │
 │  → dense residual flow for curl (NeuFlow-v2-class / mesh refine)    │
@@ -250,11 +242,11 @@ The 2026 market's negative space, from review mining:
 ### 5.2 Design principles
 
 - **Physics first, learning second.** Multi-view fusion recovers true content; learned models handle residuals and single-shot fallbacks. Never let a generative model silently touch an archival output.
-- **Linear RAW everywhere possible.** Glare photometry, fusion math, and color science are all better before tone curves. (iOS: 12MP RAW/YUV sequential frames; Android: DNG bursts; graceful YUV fallback.)
+- **Linear RAW everywhere possible.** Glare photometry, fusion math, and color science are all better before tone curves. (DNG bursts where the device supports RAW; graceful YUV fallback elsewhere.)
 - **Adaptive effort by escalation, not instruction.** Fast single-shot path by default; the multi-frame sweep is a *mode the user chooses* (or is offered post-hoc when the result shows glare) — not a glare-triggered instruction loop (§6).
 - **Every heavy model runs once per capture; only tiny models run per preview frame.**
 - **Two-tier compute:** everything through faithful restoration on-device; diffusion-grade enhancement opt-in on flagship NPUs or attested TEE cloud, receiving only the fused image.
-- **Shared C++ core** for fusion/geometry/quality-gating; native capture and inference per platform (§7).
+- **C++ (NDK) imaging core** for fusion/geometry/quality-gating — fast (NEON/Halide-friendly), testable off-device against the benchmark, and portable if other platforms are ever revisited (§7).
 
 ---
 
@@ -264,7 +256,12 @@ The 2026 market's negative space, from review mining:
 
 **The design consequence — lead with the flows that are clean:**
 
-1. **Primary: freehand sweep.** "Hold the phone over the photo and slowly sweep." Continuous capture during the sweep; frames auto-selected on **focus/stability/framing/novel-baseline** gates (not a glare-parameter threshold); robust/learned fusion of 5–15 frames. No on-screen movement instructions tied to detected glare; no border-anchored target objects during capture. Natural hand motion plus a sweep supplies both the large-baseline glare diversity and the sub-pixel jitter that multi-frame SR wants (Samsung's WACV 2023 work shows handshake alone carries reflection-motion cues).
+1. **Primary: freehand sweep — the fingerprint-enrollment pattern.** "Hold the phone over the photo and sweep slowly." Continuous capture during the sweep, with a **progress ring that fills as useful frames accumulate** — the same interaction users already know from fingerprint registration: generic encouragement ("keep moving") plus a completion gauge, never "move to *this* spot." The details that keep it clean:
+   - **Frame acceptance** is gated on focus/stability/framing (not a glare-parameter threshold — Capital One family).
+   - **The progress metric is unconditional and pose-based** — e.g., "N sharp frames spanning sufficient viewpoint diversity," computed from ARCore pose — the same completion bar for every photo, *not* triggered by detecting glare. Google Family A's independent claims require "determining that an obstruction is observable" followed by instructions to move to a *desired camera pose*; a fixed, glare-blind completion gauge avoids the detection predicate and never designates a target pose.
+   - **The gauge lives in screen space** (a ring by the shutter area), not anchored to the photo's borders — Family B's claims require overlay objects "positioned within the edges" of the physical item.
+   - Viewpoint diversity from a natural sweep supplies both the large-baseline glare displacement the fusion needs and the sub-pixel jitter multi-frame SR wants (Samsung's WACV 2023 work shows even handshake alone carries reflection-motion cues). If the user sweeps too little, the ring simply doesn't fill — the same self-correcting loop as a partial fingerprint touch.
+   - Helpful precedent: sweep-plus-progress-gauge enrollment UX (Touch ID, 2013) long predates the 2016 patent filings.
 2. **Fast path: single-shot + learned de-glare.** One capture, learned residual de-glare (Adobe-recipe model). Implicates none of the guided multi-capture claims. Default for matte prints and batch throughput; the app may *offer a re-scan with the sweep mode* if the result shows residual glare (post-hoc offer ≠ capture-time movement instruction — confirm with counsel).
 3. **Flash mode: flash/ambient pair fusion** built on the *expired* Microsoft flash/no-flash patent (US7457477B2, expired July 2024), avoiding Google Family C's claimed combination (glare-driven pose UI / glare-driven flash brightness + ambient-based color correction).
 4. **Live fused preview** ("sweep until the preview is clean"): progressively composite the result in the viewfinder with a coverage/progress gauge. This gives users the *feedback* value of guidance without directive movement instructions. **Attorney questions before freeze:** does a residual-glare heatmap overlay constitute "instructions corresponding to moving the camera"? Does the detected-photo outline during capture read on US10531061B2's "object positioned within the edges"? Does spoken/haptic guidance trigger doctrine-of-equivalents?
@@ -281,19 +278,18 @@ The 2026 market's negative space, from review mining:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Platform (v1) | **Android-first, native Kotlin UI/capture** | CameraX 1.5 + Camera2 interop for RAW bursts; Android is where PhotoScan is literally uninstallable today |
-| iOS (v2) | **Separate native capture module** (AVFoundation sequential 12MP responsive captures, direct delivery, AE/AWB/AF locks, per-frame intrinsics; ARKit pose); Core ML/ANE inference via coremltools 9.x or ExecuTorch Core ML backend | RAW bursts don't exist on iOS; brackets cap at ~3–5 and override manual locks; deferred processing bypasses the app. iOS demographic is critical (4.8★ demand signal) |
-| Shared code | **C++ imaging core** (fusion, geometry, glare compositing, quality gates, thermal ladder) bridged per platform (Djinni-style); KMP only for orchestration/state if desired | Snap + Photoroom precedent; no production KMP pixel pipelines exist; capture layers cannot be shared |
-| Inference runtime | **LiteRT** on Android (ML Drift GPU universal path; NPU via CompiledModel + Play AI Packs); **Core ML** on iOS (`computeUnits=.all`, FP16/INT8, ANE-resident ops validated early); ExecuTorch for prototyping both | Production-GA NPU stacks; zero-copy camera→model on both platforms |
-| Quantization | INT8/w8a8 (Android), FP16→INT8 where A17+ (iOS) | 2–4× speedup, <1% loss; validate per-SoC on Qualcomm AI Hub / per-chip with MLModelBenchmarker |
-| Min requirements | Android: minSdk 31, arm64-only for ML. iOS: 17+ (responsive capture stack); reduced preview models on A13/A14 | Required by LiteRT NPU/PODAI and iOS capture APIs |
+| Platform | **Android-only, native Kotlin** (product decision; iOS out of scope) | CameraX 1.5 + Camera2 interop for RAW bursts; Android is where PhotoScan is literally uninstallable today |
+| Imaging core | **C++ via NDK** (fusion, geometry, glare compositing, quality gates, thermal ladder), JNI-bridged | Performance (NEON/Halide-friendly), testable off-device against the benchmark, portable later if scope ever widens |
+| Inference runtime | **LiteRT** (ML Drift GPU universal path; NPU via CompiledModel + Play AI Packs for Qualcomm/MediaTek); ExecuTorch for research-checkpoint prototyping | Production-GA NPU stack; zero-copy camera→model via `AHardwareBuffer` |
+| Quantization | INT8/w8a8 for all shipping models | 2–4× speedup, <1% loss; validate per-SoC on Qualcomm AI Hub device farm early |
+| Min requirements | minSdk 31, arm64-only for ML features | Required by LiteRT NPU/PODAI anyway |
 | Classical CV | OpenCV (MAGSAC++, cornerSubPix, ECC) | Solved, cheap, license-clean |
 | Merge core | Port of Handheld-MFSR (IPOL 2023 reference) with robust glare-suppressing weights | Peer-reviewed, open, joint demosaic+denoise+SR |
 | Color pipeline | DNG dual-illuminant matrices + colorimetric render path + C5/CCMNet-class illuminant net + paper-white/flash anchors | §3.7; the substance behind archival claims |
-| Model delivery | Play AI Packs (Android) / Apple-Hosted Background Assets (iOS 26) | Symmetric large-weight delivery, decoupled from app releases |
-| Memory/thermal | 12MP working resolution for bursts; tiled 24/48MP; pooled buffers; thermal-degradation ladder in shared core | iOS jetsam ~2.1GB (4GB devices) – ~6.1GB (Pro Max); `thermalState` throttling |
+| Model delivery | Play AI Packs / Play Feature Delivery | Per-SoC compiled-model delivery, decoupled from app releases, no APK bloat |
+| Memory/thermal | 12MP working resolution for bursts; tile anything larger; pooled buffers; degradation ladder off the Android Thermal API | Mid-range devices must survive a 200-photo batch session |
 | Cloud tier | Confidential-computing GPUs (H100/H200 TEE), remote attestation, ephemeral processing | The 2026-credible privacy architecture; fused image only |
-| Maintenance posture | Track targetSdk/iOS SDK aggressively | The incumbent died of neglect, not competition |
+| Maintenance posture | Track targetSdk aggressively | The incumbent died of neglect, not competition |
 
 ---
 
@@ -331,7 +327,7 @@ Data, not architecture, is the accuracy lever (Genius Scan 51%→85%; Photomyne 
 
 | Status | Components |
 |---|---|
-| ✅ Safe (Apache-2.0 / MIT / BSD) | LightGlue, XFeat, Glue-Factory open-SuperPoint, RoMa/RoMa v2, RAFT/SEA-RAFT, OpenCV, SAM/SAM 2 + MobileSAM/SlimSAM, DocRes, LaMa, Real-ESRGAN, SwinIR, GFPGAN, DDColor, OSEDiff, DiffBIR, MAXIM, WindowSeat weights, HDR+/MFSR IPOL reimplementations, Apple Depth Pro, coremltools (BSD-3), ExecuTorch (BSD-3) |
+| ✅ Safe (Apache-2.0 / MIT / BSD) | LightGlue, XFeat, Glue-Factory open-SuperPoint, RoMa/RoMa v2, RAFT/SEA-RAFT, OpenCV, SAM/SAM 2 + MobileSAM/SlimSAM, DocRes, LaMa, Real-ESRGAN, SwinIR, GFPGAN, DDColor, OSEDiff, DiffBIR, MAXIM, WindowSeat weights, HDR+/MFSR IPOL reimplementations, Apple Depth Pro, ExecuTorch (BSD-3) |
 | ❌ Blocked without a deal | CodeFormer, StableSR (S-Lab non-commercial), SUPIR (explicit NC), FLUX.1-dev weights, MASt3R/DUSt3R (CC BY-NC-SA), original SuperPoint/SuperGlue weights, Ultralytics YOLO (AGPL-3.0) |
 | ⚠ Unclear — verify or retrain | BOPBTL (MIT license vs "academic use only" README), BIPNet/Burstormer weights, RDNet, DAI, Lei flash-cues repo ("TBD"), EdgeSAM (S-Lab), DocTr++/DocScanner/UVDoc/DewarpNet checkpoints, HonestFace/OSDFace, **C5 / CCMNet** (illuminant estimation — license unconfirmed) |
 
@@ -350,7 +346,7 @@ Ranked by how much they could change the plan:
    - **Clean routes:** unguided freehand sweep (no movement instructions, no border-anchored targets, no glare-detection gate); single-shot neural de-glare; flash/no-flash on expired US7457477B2; min/median compositing per se (dependent claims only). "Learned fusion instead of min-composite" is **not** a safe harbor — the composite limitation reads on neural fusion too.
    - **Validity/monitoring leverage:** the inventors' own Aug 2015 SIGGRAPH paper is citable prior art against the EP obstruction patent (no grace period in Europe); PhotoScan is abandoned while fees are still being paid — **watch US maintenance-fee windows 2026–2028**; a lapse of Family B would unlock the corner-dot UX early. Consider quietly exploring a Google license/covenant — it would convert the Tier-1 risk into a moat.
    - **Actions:** attorney claim charts of both Google families *before the capture UX freezes* (Phase 0 gate); attorney answers to the §6 questions (glare heatmap display, detected-quad outline, audio guidance DoE); patent watches (Capital One continuation, EP divisional line, Adobe/Kee and Apple filings publishing through 2027); build the defensive prior-art file (SIGGRAPH 2015, CVPR 2000 layer extraction, Farid–Adelson 1999, Levin–Weiss 2004, Agrawal SIGGRAPH 2005, Kodak US5974199, Microsoft flash/no-flash).
-2. **iOS capture divergence (now researched; residual unknowns are empirical).** The Android RAW-burst design has no iOS equivalent (§3.5) — the plan now specifies sequential 12MP responsive captures with a shared C++ core. Remaining unknowns requiring a 1–2 week device spike: sustained shot-to-shot rate at 12MP with locked AE/AWB on iPhone 13/15/17; `maxBracketedCapturePhotoCount` on current hardware; ARKit↔AVCaptureSession coexistence/handoff latency; ANE residency of our specific ops after conversion; thermal soak behavior.
+2. **Android fleet fragmentation.** RAW capability (`REQUEST_AVAILABLE_CAPABILITIES_RAW`) is not universal, and sustained multi-frame RAW burst behavior (throttling, buffer limits) varies by OEM. What fraction of the installed base gets the RAW path vs. the YUV fallback determines how prominently "linear-RAW fusion" can feature in positioning — needs a device-matrix survey in Phase 0. (iOS is out of scope by product decision; the July 2026 iOS feasibility findings are preserved in PR history if that ever changes.)
 3. **Colorimetric accuracy & DPI claims (now substantiated; wording matters).** The two-tier honesty model (§3.7) makes claims defensible: target-free = "accurate color" (ΔE00 ~3–7), archival mode = per-scan measured ΔE and measured ppi against FADGI aims. Remaining work: in-house OpenDICE scoring per device class; C5/CCMNet license verification; AR-scale accuracy validation at 20–40cm capture distance; aged-paper-white reliability study; whether genealogy platforms preserve embedded ICC/resolution metadata on upload.
 4. **Sherlocking.** Google or Apple could absorb scanning into Photos at any time. Defensibility = pipeline quality + archival trust + batch/metadata workflows, not the capture gimmick alone.
 5. **NPU operator coverage.** Vendor compilers may not support deformable convs/attention at full res; validate every architecture on Qualcomm AI Hub / Core ML early (cheap to check early, expensive late).
@@ -365,10 +361,9 @@ Ranked by how much they could change the plan:
 ### Phase 0 — Feasibility spikes & legal gates (6–10 weeks)
 - **FTO gate:** attorney claim charts of Google Families A & B + the §6 UX questions. No capture-UX freeze until this lands. Start maintenance-fee watches and the prior-art file.
 - Port the IPOL Handheld-MFSR merge; feed it a manually-captured DNG burst of a glossy print; add robust glare-suppressing weights. **Go/no-go: fused output visibly beats PhotoScan on the same print.**
-- Android capture prototype: CameraX 1.5 RAW burst with AE/AWB lock + ARCore pose logging on 2–3 reference devices (flagship + mid-range).
-- **iOS capture spike (1–2 weeks):** measure sequential-capture rates, bracket limits, ARKit/AVCapture handoff, ANE latencies for candidate models on A16/A19 devices.
-- **Color spike:** DNG-matrix colorimetric render path + OpenDICE scoring of a GoldenThread target on 2 devices; validate AR scale at print distances.
-- Alignment harness (XFeat+LightGlue+MAGSAC++); NPU operator-coverage checks (Qualcomm AI Hub + coremltools) for candidate fusion/de-glare architectures.
+- Capture prototype: CameraX 1.5 RAW burst with AE/AWB lock + ARCore pose logging on 2–3 reference devices (flagship + mid-range); survey RAW-capability and burst-throttling behavior across a device matrix.
+- **Color spike:** DNG-matrix colorimetric render path + OpenDICE scoring of a GoldenThread target on 2 devices; validate ARCore scale accuracy at 20–40cm print distances.
+- Alignment harness (XFeat+LightGlue+MAGSAC++); NPU operator-coverage checks (Qualcomm AI Hub) for candidate fusion/de-glare architectures.
 - Build v0 of the print benchmark (50 prints, phone bursts + flatbed ground truth).
 
 ### Phase 1 — Capture core MVP (3–4 months)
@@ -388,7 +383,7 @@ Ranked by how much they could change the plan:
 ### Phase 3 — Enhance tier & expansion (ongoing)
 - One-step diffusion enhance tier: on-device on flagship NPUs, TEE-cloud elsewhere (opt-in, C2PA-labeled).
 - Face restoration with fidelity slider; reference-conditioned family faces.
-- Colorization (creative, labeled). iOS app on the shared C++ core.
+- Colorization (creative, labeled).
 - Expansion candidates: negatives/slides via backlit capture (FilmBox's ~2MP output is a low bar), framed-photo/behind-glass mode, genealogy-service exports.
 - Re-evaluate capture UX options if Google patents lapse or a license lands.
 
@@ -450,11 +445,8 @@ Ranked by how much they could change the plan:
 - CameraX 1.5: https://android-developers.googleblog.com/2025/11/introducing-camerax-15-powerful-video.html
 - LiteRT NPU GA: https://developers.googleblog.com/litert-the-universal-framework-for-on-device-ai/
 - ExecuTorch 1.0: https://pytorch.org/blog/introducing-executorch-1-0/
-- iOS responsive/deferred capture (WWDC23): https://developer.apple.com/videos/play/wwdc2023/10105/ · High-res capture (WWDC26): https://developer.apple.com/videos/play/wwdc2026/304/
-- coremltools 9: https://github.com/apple/coremltools/releases · ARKit high-res frames: https://developer.apple.com/documentation/arkit/arsession/3975720-capturehighresolutionframe
-- Vision document segmentation: https://developer.apple.com/documentation/vision/vndetectdocumentsegmentationrequest
-- Snap Djinni (shared C++ core precedent): https://eng.snap.com/improving_djinni · Photoroom PhotoGraph: https://www.photoroom.com/inside-photoroom/building-cross-platform-image-renderer
 - Qualcomm AI Hub: https://aihub.qualcomm.com/
+- ARCore: https://developers.google.com/ar · Camera2 color calibration metadata: https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics
 - Google Private AI Compute: https://blog.google/innovation-and-ai/products/google-private-ai-compute/
 
 **UX & competitive**
