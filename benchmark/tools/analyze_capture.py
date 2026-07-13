@@ -41,19 +41,29 @@ def load_package(cap_dir):
     return manifest, frames
 
 
+def _exposure_product(meta):
+    exposure = meta.get("sensor_exposure_time_ns")
+    iso = meta.get("sensor_sensitivity_iso")
+    return exposure * iso if exposure and iso else None
+
+
 def audit(cap_dir):
     manifest, frames = load_package(cap_dir)
     metas = [f["meta"] for f in frames]
     findings = []
 
-    products = [
-        m["sensor_exposure_time_ns"] * m["sensor_sensitivity_iso"]
-        for m in metas
-        if "sensor_exposure_time_ns" in m and "sensor_sensitivity_iso" in m
-    ]
+    products = [p for p in (_exposure_product(m) for m in metas) if p is not None]
+    if len(products) < len(metas):
+        findings.append(
+            f"exposure/ISO metadata missing on {len(metas) - len(products)}/{len(metas)} frames"
+        )
     if products:
         spread = (max(products) - min(products)) / max(products)
-        exposures = {(m["sensor_exposure_time_ns"], m["sensor_sensitivity_iso"]) for m in metas}
+        exposures = {
+            (m["sensor_exposure_time_ns"], m["sensor_sensitivity_iso"])
+            for m in metas
+            if _exposure_product(m) is not None
+        }
         if len(exposures) > 1:
             findings.append(
                 f"exposure/ISO changed mid-burst across {len(exposures)} settings "
@@ -118,15 +128,18 @@ def fuse(cap_dir, out_dir):
         metas.append(f["meta"])
 
     ref = len(imgs) // 2
-    ref_prod = metas[ref]["sensor_exposure_time_ns"] * metas[ref]["sensor_sensitivity_iso"]
-    gains = [
-        ref_prod / (m["sensor_exposure_time_ns"] * m["sensor_sensitivity_iso"]) for m in metas
-    ]
+    ref_prod = _exposure_product(metas[ref])
+    gains = []
+    for m in metas:
+        prod = _exposure_product(m)
+        gains.append(ref_prod / prod if ref_prod and prod else 1.0)
 
     orb = cv2.ORB_create(nfeatures=8000)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
     ref_gray = cv2.cvtColor(imgs[ref], cv2.COLOR_BGR2GRAY)
     kp_ref, des_ref = orb.detectAndCompute(ref_gray, None)
+    if des_ref is None or len(des_ref) < 4:
+        sys.exit(f"reference frame {ref} has too few features to register against")
 
     aligned, masks, reg = [], [], []
     for i, img in enumerate(imgs):
@@ -137,10 +150,26 @@ def fuse(cap_dir, out_dir):
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         kp, des = orb.detectAndCompute(gray, None)
-        good = [m for m, n in bf.knnMatch(des, des_ref, k=2) if m.distance < 0.75 * n.distance]
+        if des is None or len(des) < 4:
+            reg.append({"frame": i, "error": "insufficient_features"})
+            aligned.append(img.astype(np.float32))
+            masks.append(np.zeros((h, w), bool))
+            continue
+        pairs = bf.knnMatch(des, des_ref, k=2)
+        good = [p[0] for p in pairs if len(p) >= 2 and p[0].distance < 0.75 * p[1].distance]
+        if len(good) < 4:
+            reg.append({"frame": i, "error": "insufficient_matches", "matches": len(good)})
+            aligned.append(img.astype(np.float32))
+            masks.append(np.zeros((h, w), bool))
+            continue
         src = np.float32([kp[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
         dst = np.float32([kp_ref[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
         hom, inliers = cv2.findHomography(src, dst, cv2.USAC_MAGSAC, 3.0)
+        if hom is None or inliers is None:
+            reg.append({"frame": i, "error": "homography_failed", "matches": len(good)})
+            aligned.append(img.astype(np.float32))
+            masks.append(np.zeros((h, w), bool))
+            continue
         inliers = inliers.ravel().astype(bool)
         proj = cv2.perspectiveTransform(src[inliers], hom)
         resid = float(np.sqrt(((proj - dst[inliers]) ** 2).sum(axis=2)).mean())
