@@ -45,3 +45,11 @@ The status panel reports the selected camera, hardware level, RAW/manual/burst c
 - ARCore coexistence, CameraX sequential RAW fallback, energy instrumentation, and thermal-soak orchestration are not implemented yet.
 - App-private external storage is intentional. There is no background upload or cloud path.
 - A process death during a burst can leave a partial directory without `capture.json`; ingestion must reject it.
+
+## Exporting packages
+
+`Android/data` app-private storage is not browsable on many devices. The
+EXPORT CAPTURE PACKAGES button zips one package (or all of them) and
+writes the archive to any Storage Access Framework destination — Downloads,
+a cloud-drive app, or a USB drive — so packages can be qualified from
+secondary devices without adb.
