@@ -25,18 +25,22 @@ This file separates implemented tooling from physical evidence. A green software
 - Separate delivered and persisted frame counts, failed pre-burst attempt records, file hashes, and validator-compatible capture manifests.
 - Lifecycle generation guards and deferred `ImageReader` close while writers own images.
 
+### First Device Evidence (2026-07-13)
+
+Eleven capture packages from a HUAWEI GRL-AL10 (one with full frame payloads) were audited; see [`benchmark/reports/2026-07-13-grl-al10-capture-audit.md`](benchmark/reports/2026-07-13-grl-al10-capture-audit.md). Measured on that device: YUV stream combination and cadence (RAW absent — the fallback path was exercised), 3A lock behavior (AE lock reported `LOCKED` while the HAL swapped exposure/ISO at a constant exposure×gain product), payload integrity, and an ORB+MAGSAC++ registration/fusion baseline (~1.2px mean residual). One defect found and fixed: replaying HAL-reported color-correction gains with AWB off baked an implausible white balance into the burst (`WhiteBalanceStrategy` now prefers AWB lock). The audited captures contained no glare and no camera motion, so they qualify the capture path only — not Gate A. Offline analysis commands: `benchmark/tools/analyze_capture.py` (`audit`, `fuse`; requires numpy and opencv-python-headless, recorded in `ARTIFACTS.csv`).
+
 ## Not Yet Executed
 
-The workspace has no attached Android phone, prints, scanner, or physical quality target. The following remain unmeasured:
+The following remain unmeasured:
 
-- stream combination success and RAW/YUV cadence on any phone
+- stream combination success and RAW cadence on a RAW-capable phone (only a YUV-only device is qualified so far)
 - OEM timestamp equality and `DngCreator` interoperability
-- actual 3A/manual consistency and logical-camera switching
+- logical-camera switching behavior beyond the single audited device
 - ImageReader buffer pressure and partial/failure behavior
-- memory, energy, thermal soak, and batch stability
-- ARCore coexistence and CameraX sequential RAW fallback
+- memory, energy, thermal soak, and 200-capture batch stability
+- ARCore coexistence and CameraX sequential RAW fallback (ARCore is unavailable on the audited HarmonyOS-based device)
 - PhotoScan and flatbed comparisons
-- glare, legitimate-highlight, color, geometry, and SFR measurements
+- glare, legitimate-highlight, color, geometry, and SFR measurements (audited captures had no glare and no sweep motion)
 - observed usability sessions
 - counsel claim charts
 
@@ -46,7 +50,7 @@ Fill one row per physical camera/device/OS build. Do not merge results across up
 
 | Device instance | Model/build | Camera ID | Hardware level | RAW | Manual sensor/post | Burst capability | Preview+RAW | Preview+YUV | 5-frame cadence | Drops | Peak memory | Thermal soak | DNG opens | Notes |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|
-| pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | No device attached |
+| owner-primary | HUAWEI GRL-AL10, Kirin 9010, Android 12 / API 31, build 104.2.0.201C00 | 0 (bursts on physical 2) | LIMITED | no | no / yes | no | n/a (no RAW) | yes, 3344x3072 I420 | 42ms (~24fps) x10 bursts; 50-53ms x1 | 0 in 11 bursts | pending | pending | n/a (no RAW) | AE/AWB lock available; AE lock swaps exposure/ISO at constant product; WB replay defect found and fixed; no GMS (no ARCore/ML Kit); see 2026-07-13 audit report |
 
 Minimum first pass:
 
