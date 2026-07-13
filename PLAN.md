@@ -381,7 +381,7 @@ OpenDICE is appropriate for off-device qualification using supported targets and
 - A paper-white border is a useful uncertain prior, not a neutral truth; age and stock can shift it materially.
 - A session profile characterizes the capture setup. Report Delta E only on independent known verification patches in that capture, never as the unknown photograph's color error.
 - A 24-patch ColorChecker can support checks but is not sufficient for a robust custom ICC profile under the cited FADGI guidance. Use a separately characterized, sufficiently sampled profiling target.
-- Learned illuminant estimation is a Phase 2 candidate for target-free color, not an MVP dependency. Compact cross-camera models exist (C5, ICCV 2021, roughly 2 MB; CCMNet, 2025, roughly 1 MB, driven by the same DNG calibration matrices this pipeline already reads). Adopt one only after artifact-level license review and a measured Delta E00 improvement on independent verification patches in the benchmark.
+- Learned illuminant estimation is a Phase 2 candidate for target-free color, not an MVP dependency. Compact cross-camera models exist: C5 (ICCV 2021, reported at roughly 2 MB) self-calibrates from unlabeled test-time frames, while CCMNet (2025, reported at roughly 1 MB) derives a camera fingerprint from the same pre-calibrated color-calibration matrices this pipeline already reads from DNG/ISP metadata. Verify the reported footprints and input requirements against the released code and weights before any architecture work assumes them; adopt one only after artifact-level license review and a measured Delta E00 improvement on independent verification patches in the benchmark.
 
 ### 9.3 Scale and resolution terminology
 
