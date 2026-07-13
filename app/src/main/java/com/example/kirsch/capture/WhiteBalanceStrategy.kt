@@ -50,6 +50,8 @@ object WhiteBalanceStrategy {
         return greenSplit <= MAX_GREEN_SPLIT
     }
 
+    // Empirically derived from the single device audited so far (GRL-AL10);
+    // revisit against the device matrix as more sensors are qualified.
     private const val MIN_GAIN = 0.5f
     private const val MAX_GAIN = 8f
     private const val MAX_GREEN_SPLIT = 0.05f

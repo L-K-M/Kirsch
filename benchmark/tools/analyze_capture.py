@@ -81,8 +81,9 @@ def audit(cap_dir):
     gains = metas[0].get("color_correction_gains")
     if gains and len(gains) == 4:
         r, g_even, g_odd, b = gains
-        split = abs(g_even - g_odd) / max(g_even, g_odd)
-        if split > 0.05 or not all(0.5 <= v <= 8 for v in gains):
+        gains_in_range = all(0.5 <= v <= 8 for v in gains)
+        split = abs(g_even - g_odd) / max(g_even, g_odd) if gains_in_range else 1.0
+        if split > 0.05 or not gains_in_range:
             findings.append(
                 f"implausible WB gains {gains} (green split {split * 100:.0f}%): "
                 "likely HAL-misreported values replayed with AWB off; prefer AWB lock"
@@ -95,8 +96,12 @@ def audit(cap_dir):
     if fired and len(fired) != len(metas):
         findings.append(f"flash fired in {len(fired)}/{len(metas)} frames: mixed illumination stack")
 
-    ts = [m["sensor_timestamp_ns"] for m in metas]
-    deltas = [(b - a) / 1e6 for a, b in zip(ts, ts[1:])]
+    ts = [m.get("sensor_timestamp_ns") for m in metas]
+    missing_ts = sum(t is None for t in ts)
+    if missing_ts:
+        findings.append(f"sensor_timestamp_ns missing on {missing_ts}/{len(metas)} frames")
+    present = [t for t in ts if t is not None]
+    deltas = [(b - a) / 1e6 for a, b in zip(present, present[1:])]
     report = {
         "capture_id": manifest["capture_id"],
         "mode": manifest["mode"],
