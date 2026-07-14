@@ -14,6 +14,12 @@ import java.util.zip.ZipOutputStream
  */
 object CapturePackageZipper {
     data class Result(val entryCount: Int, val byteCount: Long)
+    data class Source(
+        val archivePath: String,
+        val directory: File,
+        val includedFiles: List<File>? = null,
+        val contentOverrides: Map<String, ByteArray> = emptyMap(),
+    )
 
     /**
      * Writes each source directory as a top-level folder in the zip.
@@ -28,20 +34,50 @@ object CapturePackageZipper {
         require(collidingNames.isEmpty()) {
             "Source directories must have unique names; duplicates: $collidingNames"
         }
+        return zipNamed(bases.map { Source(it.name, it) }, output)
+    }
+
+    fun zipNamed(sources: List<Source>, output: OutputStream): Result {
+        val canonical = sources.map { source ->
+            source.copy(
+                directory = source.directory.canonicalFile,
+                includedFiles = source.includedFiles?.map(File::getCanonicalFile),
+            )
+        }
+            .distinctBy { it.archivePath to it.directory.path }
+        canonical.forEach { source ->
+            require(source.archivePath.isNotBlank() && !source.archivePath.startsWith("/") &&
+                source.archivePath.split('/').none { it.isBlank() || it == "." || it == ".." }) {
+                "Archive paths must be normalized and relative"
+            }
+            require(source.directory.isDirectory) { "Source is not a directory: ${source.directory}" }
+        }
+        val collidingPaths = canonical.groupBy(Source::archivePath).filterValues { it.size > 1 }.keys
+        require(collidingPaths.isEmpty()) { "Archive paths must be unique; duplicates: $collidingPaths" }
         var entries = 0
         var bytes = 0L
         ZipOutputStream(output.buffered()).use { zip ->
-            for (base in bases.sortedBy(File::getName)) {
-                val files = base.walkTopDown()
-                    .filter { it.isFile && !it.name.endsWith(".partial") }
+            for (source in canonical.sortedBy(Source::archivePath)) {
+                val base = source.directory
+                val files = (source.includedFiles?.asSequence() ?: base.walkTopDown())
+                    .filter {
+                        it.isFile && !it.name.endsWith(".partial") && !it.name.contains(".partial.") &&
+                            it.canonicalPath.startsWith(base.canonicalPath + File.separator)
+                    }
                     .sortedBy { it.relativeTo(base).invariantSeparatorsPath }
                 for (file in files) {
-                    val name = "${base.name}/${file.relativeTo(base).invariantSeparatorsPath}"
+                    val relative = file.relativeTo(base).invariantSeparatorsPath
+                    val name = "${source.archivePath}/$relative"
                     zip.putNextEntry(ZipEntry(name))
-                    file.inputStream().use { input -> input.copyTo(zip) }
+                    val override = source.contentOverrides[relative]
+                    if (override != null) {
+                        zip.write(override)
+                    } else {
+                        file.inputStream().use { input -> input.copyTo(zip) }
+                    }
                     zip.closeEntry()
                     entries++
-                    bytes += file.length()
+                    bytes += override?.size?.toLong() ?: file.length()
                 }
             }
         }

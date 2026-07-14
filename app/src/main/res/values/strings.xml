@@ -1,20 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kirsch Phase 0</string>
-    <string name="capture_title">KIRSCH / PHASE 0 CAPTURE</string>
+    <string name="app_name">Kirsch</string>
+    <string name="capture_title">KIRSCH / GLARE-REDUCED SCAN</string>
     <string name="unassigned_print_id">print-unassigned</string>
-    <string name="capture_burst">CAPTURE 5-FRAME BURST</string>
+    <string name="capture_burst">START SCAN</string>
     <string name="waiting_for_camera">Waiting for camera permission and preview surface</string>
     <string name="capture_package_path">Validated package can be copied from:\n%1$s</string>
-    <string name="export_captures">EXPORT CAPTURE PACKAGES</string>
+    <string name="export_captures">EXPORT PACKAGES</string>
     <string name="export_title">Export as zip</string>
     <string name="export_all">All packages (%1$d)</string>
-    <string name="export_nothing">No completed capture packages to export</string>
+    <string name="export_nothing">No completed acquisition or scan packages to export</string>
     <string name="export_running">Exporting…</string>
     <string name="export_done">Exported %1$d files (%2$.1f MB source)</string>
     <string name="export_failed">Export failed: %1$s</string>
     <string-array name="capture_modes">
-        <item>RAW / DNG</item>
-        <item>YUV / I420</item>
+        <item>Quality YUV sweep</item>
+        <item>RAW acquisition only</item>
+        <item>Quick single frame</item>
     </string-array>
+    <string name="review_scans">REVIEW SCANS</string>
+    <string name="no_scans">No processed scans are ready for review</string>
+    <string name="scan_queued">Capture saved. Processing queued: %1$s</string>
+    <string name="scan_ready">Scan ready for review: %1$s</string>
+    <string name="scan_failed">Processing failed for %1$s: %2$s</string>
+    <string name="capture_not_processed">Capture package status is %1$s; failed acquisitions are retained but not queued</string>
+    <string name="raw_acquisition_saved">RAW acquisition saved. Product processing is disabled until the DNG color pipeline is validated.</string>
+    <string name="review_title">Review scan</string>
+    <string name="review_status">Output: %1$s · state: %2$s</string>
+    <string name="corner_editor_help">Drag all four handles to the true print corners. Manual correction remains available even when automatic detection succeeds.</string>
+    <string name="corner_editor_description">Manual print corner editor with four draggable handles</string>
+    <string name="apply_manual_corners">APPLY CORNERS</string>
+    <string name="applying_manual_corners">Applying manual corner correction…</string>
+    <string name="accept_scan">ACCEPT</string>
+    <string name="scan_accepted">Scan accepted. Acquisition sources and derivative history were retained.</string>
+    <string name="feature_status">CAPABILITIES</string>
+    <string name="create_restored_derivative">Create %1$s restored derivative</string>
+    <string name="processing_recipe">Creating %1$s restored derivative…</string>
+    <string name="derivative_created">Derivative created: %1$s</string>
+    <string name="processing_failed">Processing failed: %1$s</string>
+    <string name="archival_scale">ARCHIVAL SCALE</string>
+    <string name="width_mm">Confirmed print width (mm)</string>
+    <string name="height_mm">Confirmed print height (mm)</string>
+    <string name="confirmed_dimensions">User-confirmed physical dimensions</string>
+    <string name="coplanar_target">Measured with a coplanar target</string>
+    <string name="target_id_optional">Target ID (required for target measurement)</string>
+    <string name="record_scale">RECORD</string>
+    <string name="scale_recorded">Sampling frequency recorded: %1$.1f × %2$.1f PPI. No delivered-resolution claim was made.</string>
+    <string name="invalid_dimensions">Invalid physical dimensions</string>
 </resources>

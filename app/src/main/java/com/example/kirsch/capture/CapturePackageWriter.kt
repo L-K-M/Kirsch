@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.DngCreator
 import android.media.Image
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Size
 import java.io.File
@@ -23,8 +24,12 @@ class CapturePackageWriter(
     private val requestedFrameCount: Int,
     private val characteristics: CameraCharacteristics,
     cameraJson: JSONObject,
+    private val captureProfile: CaptureProfile,
 ) {
     private val created = Instant.now()
+    private val createdElapsedMs = SystemClock.elapsedRealtime()
+    private val powerManager = context.getSystemService(PowerManager::class.java)
+    private val initialThermalStatus = powerManager?.currentThermalStatus
     private val root = File(
         context.getExternalFilesDir("captures") ?: File(context.filesDir, "captures"),
         captureId,
@@ -160,7 +165,17 @@ class CapturePackageWriter(
             .put("device", CaptureMetadata.deviceJson())
             .put("frames", JSONArray(sortedFrames))
             .put("errors", JSONArray(errorSnapshot))
-            .put("extensions", JSONObject().put("warnings", JSONArray(warningSnapshot)))
+            .put(
+                "extensions",
+                JSONObject()
+                    .put("warnings", JSONArray(warningSnapshot))
+                    .put("capture_profile", captureProfile.manifestValue)
+                    .put("requested_frame_interval_ns", captureProfile.frameIntervalNs)
+                    .put("capture_elapsed_ms", SystemClock.elapsedRealtime() - createdElapsedMs)
+                    .put("java_heap_used_bytes", usedHeapBytes())
+                    .put("thermal_status_start", initialThermalStatus)
+                    .put("thermal_status_end", powerManager?.currentThermalStatus),
+            )
         val output = File(root, "capture.json")
         writeJsonAtomically(output, manifest)
         return output
@@ -203,5 +218,10 @@ class CapturePackageWriter(
             }
         }
         return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    private fun usedHeapBytes(): Long {
+        val runtime = Runtime.getRuntime()
+        return runtime.totalMemory() - runtime.freeMemory()
     }
 }

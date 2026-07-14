@@ -1280,11 +1280,245 @@ def _validate_capture_file_record(
     return resolved
 
 
+def validate_scan_package(manifest_path: Path) -> list[Issue]:
+    validator = Validator(manifest_path)
+    try:
+        data = load_json(manifest_path)
+    except (OSError, json.JSONDecodeError, DuplicateKeyError, ValueError) as error:
+        return [Issue("JSON_INVALID", "/", str(error))]
+    required = {"schema_version", "scan_id", "state", "acquisition_manifest"}
+    allowed = required | {
+        "created_utc",
+        "accepted_utc",
+        "processing_attempt",
+        "acquisition_sha256",
+        "source_retained",
+        "used_fusion",
+        "preview_path",
+        "working_image_path",
+        "processing_report",
+        "selected_quad",
+        "manual_quad",
+        "archival_scale",
+        "derivatives",
+        "error",
+    }
+    if not validator.require_keys(data, "", required):
+        return sorted(validator.issues)
+    validator.reject_unknown(data, "", allowed)
+    if data.get("schema_version") != "1.0.0":
+        validator.issue("SCHEMA_VERSION", "/schema_version", "expected 1.0.0")
+    validator.validate_id(data.get("scan_id"), "/scan_id")
+    state = data.get("state")
+    if state not in {"processing", "review", "accepted", "failed"}:
+        validator.issue("SCAN_STATE", "/state", "invalid scan state")
+    if "processing_attempt" in data and (
+        not isinstance(data["processing_attempt"], int)
+        or isinstance(data["processing_attempt"], bool)
+        or data["processing_attempt"] < 1
+    ):
+        validator.issue("PROCESSING_ATTEMPT", "/processing_attempt", "must be a positive integer")
+    acquisition = data.get("acquisition_manifest")
+    expected_acquisition = f"capture-package:{data.get('scan_id')}"
+    if acquisition != expected_acquisition:
+        validator.issue(
+            "ACQUISITION_REFERENCE",
+            "/acquisition_manifest",
+            f"expected {expected_acquisition}",
+        )
+    for field in ("created_utc", "accepted_utc"):
+        if field in data:
+            validator.validate_timestamp(data[field], f"/{field}")
+    acquisition_digest = data.get("acquisition_sha256")
+    if acquisition_digest is not None and (
+        not isinstance(acquisition_digest, str)
+        or not SHA256_PATTERN.fullmatch(acquisition_digest)
+    ):
+        validator.issue("INVALID_SHA256", "/acquisition_sha256", "must be lowercase SHA-256")
+    for field in ("source_retained", "used_fusion"):
+        if field in data and not isinstance(data[field], bool):
+            validator.issue("TYPE_BOOLEAN", f"/{field}", "must be a boolean")
+
+    def validate_quad(value: Any, pointer: str) -> None:
+        if not isinstance(value, dict):
+            validator.issue("TYPE_OBJECT", pointer, "must be an object")
+            return
+        validator.reject_unknown(value, pointer, {"area_pixels", "normalized_points"})
+        points = value.get("normalized_points")
+        if not isinstance(points, list) or len(points) != 4:
+            validator.issue("QUAD_POINTS", f"{pointer}/normalized_points", "must contain four points")
+            return
+        for index, point in enumerate(points):
+            point_pointer = f"{pointer}/normalized_points/{index}"
+            if not isinstance(point, list) or len(point) != 2:
+                validator.issue("QUAD_POINT", point_pointer, "must contain x and y")
+                continue
+            for axis, coordinate in enumerate(point):
+                if (
+                    not isinstance(coordinate, (int, float))
+                    or isinstance(coordinate, bool)
+                    or not math.isfinite(coordinate)
+                    or not 0 <= coordinate <= 1
+                ):
+                    validator.issue("QUAD_COORDINATE", f"{point_pointer}/{axis}", "must be in [0, 1]")
+
+    for field in ("selected_quad", "manual_quad"):
+        if field in data:
+            validate_quad(data[field], f"/{field}")
+
+    archival = data.get("archival_scale")
+    if archival is not None:
+        pointer = "/archival_scale"
+        archival_required = {
+            "recorded_utc",
+            "authority",
+            "physical_width_mm",
+            "physical_height_mm",
+            "pixel_width",
+            "pixel_height",
+            "sampling_frequency_ppi_x",
+            "sampling_frequency_ppi_y",
+            "claim",
+            "delivered_resolution_claimed",
+        }
+        archival_allowed = archival_required | {"target_id"}
+        if validator.require_keys(archival, pointer, archival_required):
+            validator.reject_unknown(archival, pointer, archival_allowed)
+            validator.validate_timestamp(archival.get("recorded_utc"), f"{pointer}/recorded_utc")
+            authority = archival.get("authority")
+            if authority not in {"confirmed-dimensions", "coplanar-target"}:
+                validator.issue("SCALE_AUTHORITY", f"{pointer}/authority", "invalid authority")
+            if authority == "coplanar-target" and not archival.get("target_id"):
+                validator.issue("TARGET_ID", f"{pointer}/target_id", "coplanar target requires ID")
+            for field in (
+                "physical_width_mm",
+                "physical_height_mm",
+                "sampling_frequency_ppi_x",
+                "sampling_frequency_ppi_y",
+            ):
+                value = archival.get(field)
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                    validator.issue("POSITIVE_NUMBER", f"{pointer}/{field}", "must be positive")
+            for field in ("pixel_width", "pixel_height"):
+                value = archival.get(field)
+                if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                    validator.issue("POSITIVE_INTEGER", f"{pointer}/{field}", "must be positive")
+            if archival.get("claim") != "sampling-frequency-from-confirmed-physical-scale":
+                validator.issue("SCALE_CLAIM", f"{pointer}/claim", "invalid claim")
+            if archival.get("delivered_resolution_claimed") is not False:
+                validator.issue("RESOLUTION_CLAIM", f"{pointer}/delivered_resolution_claimed", "must be false")
+    if state in {"review", "accepted"}:
+        final_required = {
+            "created_utc",
+            "acquisition_sha256",
+            "source_retained",
+            "used_fusion",
+            "preview_path",
+            "working_image_path",
+            "processing_report",
+            "selected_quad",
+            "derivatives",
+        }
+        validator.require_keys(data, "", final_required)
+        if data.get("source_retained") is not True:
+            validator.issue("SOURCE_RETENTION", "/source_retained", "must be true")
+        if state == "accepted" and "accepted_utc" not in data:
+            validator.issue("ACCEPTED_TIMESTAMP", "/accepted_utc", "accepted scan requires timestamp")
+        acquisition_file = None
+        if validator.root.parent.name == "scans":
+            acquisition_file = (
+                validator.root.parent.parent
+                / "acquisitions"
+                / str(data.get("scan_id"))
+                / "capture.json"
+            )
+        if acquisition_file is None or not acquisition_file.is_file():
+            validator.issue(
+                "ACQUISITION_MISSING",
+                "/acquisition_manifest",
+                "paired acquisitions/<scan_id>/capture.json is required",
+            )
+        elif hashlib.sha256(acquisition_file.read_bytes()).hexdigest() != acquisition_digest:
+            validator.issue(
+                "ACQUISITION_HASH_MISMATCH",
+                "/acquisition_sha256",
+                "paired capture.json hash differs",
+            )
+        else:
+            for issue in validate_capture_package(acquisition_file):
+                validator.issue(
+                    f"ACQUISITION_{issue.code}",
+                    f"/acquisition{issue.pointer}",
+                    issue.message,
+                )
+        for field in ("preview_path", "working_image_path", "processing_report"):
+            if field in data:
+                validator.resolve_asset_path(data[field], f"/{field}")
+        derivatives = data.get("derivatives")
+        if not isinstance(derivatives, list) or not derivatives:
+            validator.issue("DERIVATIVES", "/derivatives", "must be a non-empty array")
+        else:
+            paths: set[str] = set()
+            for index, derivative in enumerate(derivatives):
+                pointer = f"/derivatives/{index}"
+                derivative_required = {"path", "kind", "bytes", "sha256"}
+                derivative_allowed = derivative_required | {
+                    "media_type",
+                    "recipe",
+                    "created_utc",
+                    "parent_path",
+                    "parent_sha256",
+                }
+                if not validator.require_keys(derivative, pointer, derivative_required):
+                    continue
+                validator.reject_unknown(derivative, pointer, derivative_allowed)
+                if derivative.get("kind") not in {
+                    "acquisition-master",
+                    "acquisition-derived",
+                    "confidence-map",
+                    "failure-map",
+                    "restored",
+                    "generative",
+                }:
+                    validator.issue("DERIVATIVE_KIND", f"{pointer}/kind", "invalid derivative kind")
+                byte_count = derivative.get("bytes")
+                if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count <= 0:
+                    validator.issue("INVALID_BYTES", f"{pointer}/bytes", "must be a positive integer")
+                if "created_utc" in derivative:
+                    validator.validate_timestamp(derivative["created_utc"], f"{pointer}/created_utc")
+                path_value = derivative.get("path")
+                resolved = validator.resolve_asset_path(path_value, f"{pointer}/path")
+                if isinstance(path_value, str):
+                    if path_value.casefold() in paths:
+                        validator.issue("PATH_COLLISION", f"{pointer}/path", "duplicate path")
+                    paths.add(path_value.casefold())
+                if resolved is not None:
+                    if derivative.get("bytes") != resolved.stat().st_size:
+                        validator.issue("ASSET_SIZE_MISMATCH", f"{pointer}/bytes", "size differs")
+                    actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+                    if derivative.get("sha256") != actual:
+                        validator.issue("ASSET_HASH_MISMATCH", f"{pointer}/sha256", "hash differs")
+                digest = derivative.get("sha256")
+                if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+                    validator.issue("INVALID_SHA256", f"{pointer}/sha256", "must be lowercase SHA-256")
+                parent_path = derivative.get("parent_path")
+                parent_digest = derivative.get("parent_sha256")
+                if parent_path is not None:
+                    parent = validator.resolve_asset_path(parent_path, f"{pointer}/parent_path")
+                    if parent is not None and hashlib.sha256(parent.read_bytes()).hexdigest() != parent_digest:
+                        validator.issue("PARENT_HASH_MISMATCH", f"{pointer}/parent_sha256", "hash differs")
+    if state == "failed" and not isinstance(data.get("error"), str):
+        validator.issue("FAILURE_REASON", "/error", "failed scan requires an error")
+    return sorted(validator.issues)
+
+
 def _run_validation(kind: str, path: Path, json_output: bool) -> int:
     if kind == "benchmark":
         issues = validate_benchmark(path)
-    else:
+    elif kind == "capture":
         issues = validate_capture_package(path)
+    else:
+        issues = validate_scan_package(path)
     if json_output:
         print(json.dumps([dataclasses.asdict(issue) for issue in issues], indent=2))
     elif issues:
@@ -1301,6 +1535,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command, help_text in (
         ("validate", "validate a benchmark manifest"),
         ("validate-capture", "validate an Android capture package"),
+        ("validate-scan", "validate a product scan and derivative graph"),
     ):
         child = subparsers.add_parser(command, help=help_text)
         child.add_argument("manifest", type=Path)
@@ -1314,7 +1549,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "version":
         print(f"validator={VALIDATOR_VERSION} schema={SCHEMA_VERSION}")
         return 0
-    kind = "benchmark" if args.command == "validate" else "capture"
+    kind = {
+        "validate": "benchmark",
+        "validate-capture": "capture",
+        "validate-scan": "scan",
+    }[args.command]
     return _run_validation(kind, args.manifest, args.json)
 
 

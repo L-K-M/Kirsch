@@ -33,4 +33,7 @@ object ThreeAStatePolicy {
             afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
         return aeReady && awbReady && afReady
     }
+
+    fun aeLockRequired(aeLockAvailable: Boolean, manualSensorWillBeUsed: Boolean): Boolean =
+        aeLockAvailable && !manualSensorWillBeUsed
 }
