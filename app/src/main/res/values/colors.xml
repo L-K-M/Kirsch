@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the icon photo's background so mask shapes blend seamlessly. -->
+    <color name="ic_launcher_background">#3A3B38</color>
+</resources>
