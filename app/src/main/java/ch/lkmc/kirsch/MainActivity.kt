@@ -3,72 +3,71 @@ package ch.lkmc.kirsch
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.TextureView
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.Spinner
 import android.widget.TextView
 import ch.lkmc.kirsch.capture.Camera2BurstController
-import ch.lkmc.kirsch.capture.CapturePackageZipper
 import ch.lkmc.kirsch.capture.CaptureProfile
 import ch.lkmc.kirsch.scan.ScanProcessor
 import ch.lkmc.kirsch.scan.ScanQueue
-import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
 import org.json.JSONObject
 
 class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.Listener {
-    private companion object {
-        const val CAMERA_PERMISSION_REQUEST = 100
-        const val EXPORT_DOCUMENT_REQUEST = 101
-        const val STATE_PENDING_EXPORT = "pendingExport"
+    companion object {
+        private const val CAMERA_PERMISSION_REQUEST = 100
+        const val PREFS_NAME = "kirsch-settings"
+        const val PREF_PROFILE = "capture_profile"
+        const val PREF_PRINT_ID = "print_id"
+
+        fun preferences(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        fun selectedProfile(preferences: SharedPreferences): CaptureProfile {
+            val name = preferences.getString(PREF_PROFILE, CaptureProfile.SWEEP.name)
+            return CaptureProfile.entries.firstOrNull { it.name == name } ?: CaptureProfile.SWEEP
+        }
     }
 
     private lateinit var textureView: TextureView
-    private lateinit var printId: EditText
-    private lateinit var modeSpinner: Spinner
-    private lateinit var captureButton: Button
-    private lateinit var exportButton: Button
-    private lateinit var reviewButton: Button
-    private lateinit var statusView: TextView
+    private lateinit var overlay: SweepOverlayView
+    private lateinit var statusChip: TextView
+    private lateinit var shutterButton: View
+    private lateinit var libraryButton: TextView
+    private lateinit var settingsButton: TextView
     private lateinit var controller: Camera2BurstController
     private var resumed = false
-    private var pendingExport: List<File> = emptyList()
+    private var capturing = false
+    private var previewWidth = 0
+    private var previewHeight = 0
+    private var pendingReviewScanId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // The SAF picker can outlive this Activity instance (rotation,
-        // process death); the selected packages must survive recreation or
-        // onActivityResult lands on an instance with nothing to export.
-        pendingExport = savedInstanceState?.getStringArrayList(STATE_PENDING_EXPORT)
-            ?.map(::File)
-            ?: emptyList()
         buildUi()
         controller = Camera2BurstController(this, textureView, this)
-        modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                startCameraIfReady()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                 startCameraIfReady()
             }
 
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                configureTransform()
+            }
 
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                 controller.stop()
@@ -77,14 +76,10 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
 
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
         }
-        captureButton.setOnClickListener {
-            controller.capture(printId.text.toString())
-        }
-        exportButton.setOnClickListener {
-            showExportDialog()
-        }
-        reviewButton.setOnClickListener {
-            showReviewDialog()
+        shutterButton.setOnClickListener { startScan() }
+        libraryButton.setOnClickListener { showLibraryDialog() }
+        settingsButton.setOnClickListener {
+            startActivity(SettingsActivity.intent(this))
         }
     }
 
@@ -117,200 +112,97 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         ) {
             startCameraIfReady()
         } else if (requestCode == CAMERA_PERMISSION_REQUEST) {
-            onStatus("Camera permission is required")
+            showStatus(getString(R.string.camera_permission_needed))
         }
     }
 
+    private fun startScan() {
+        val printId = preferences(this).getString(PREF_PRINT_ID, null)
+            ?.takeIf(String::isNotBlank)
+            ?: getString(R.string.unassigned_print_id)
+        pendingReviewScanId = null
+        controller.capture(printId)
+    }
+
+    // Camera2BurstController.Listener
+
     override fun onStatus(message: String) {
-        runOnUiThread {
-            statusView.text = message
-        }
+        showStatus(message)
     }
 
     override fun onBusyChanged(busy: Boolean) {
         runOnUiThread {
-            captureButton.isEnabled = !busy
-            exportButton.isEnabled = !busy
-            reviewButton.isEnabled = !busy
-            modeSpinner.isEnabled = !busy
-            printId.isEnabled = !busy
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            capturing = busy
+            shutterButton.isEnabled = !busy
+            shutterButton.alpha = if (busy) 0.4f else 1f
+            libraryButton.isEnabled = !busy
+            settingsButton.isEnabled = !busy
+            if (!busy) overlay.showFraming(getString(R.string.framing_hint))
         }
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putStringArrayList(
-            STATE_PENDING_EXPORT,
-            ArrayList(pendingExport.map(File::getAbsolutePath)),
-        )
+    override fun onSweepProgress(progress: Float, keptFrames: Int) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed || !capturing) return@runOnUiThread
+            overlay.showSweeping(getString(R.string.sweep_hint))
+            overlay.setSweepProgress(progress)
+        }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != EXPORT_DOCUMENT_REQUEST) return
-        val destination = data?.data
-        val sources = pendingExport
-        pendingExport = emptyList()
-        if (resultCode != RESULT_OK || destination == null) return
-        if (sources.isEmpty()) {
-            onStatus(getString(R.string.export_failed, "export selection was lost"))
-            return
+    override fun onPreviewConfigured(width: Int, height: Int) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            previewWidth = width
+            previewHeight = height
+            configureTransform()
         }
-        onStatus(getString(R.string.export_running))
-        Thread({
-            val result = runCatching {
-                contentResolver.openOutputStream(destination)?.use { output ->
-                    val zipSources = ScanManifestStore.locked {
-                        sources.map { directory ->
-                            val prefix = if (directory.parentFile?.name == "product") "scans" else "acquisitions"
-                            val manifest = File(directory, "scan.json")
-                            val manifestBytes = manifest.takeIf(File::isFile)?.readBytes()
-                            val files = if (manifestBytes != null) {
-                                val record = JSONObject(manifestBytes.decodeToString())
-                                buildSet {
-                                    add("scan.json")
-                                    listOf("working_image_path", "processing_report").forEach { field ->
-                                        record.optString(field).takeIf(String::isNotBlank)?.let(::add)
-                                    }
-                                    val derivatives = record.optJSONArray("derivatives")
-                                    if (derivatives != null) {
-                                        for (index in 0 until derivatives.length()) {
-                                            add(derivatives.getJSONObject(index).getString("path"))
-                                        }
-                                    }
-                                }.map { relative -> File(directory, relative) }.filter(File::isFile)
-                            } else {
-                                directory.walkTopDown()
-                                    .filter {
-                                        it.isFile && !it.name.endsWith(".partial") && !it.name.contains(".partial.")
-                                    }
-                                    .toList()
-                            }
-                            CapturePackageZipper.Source(
-                                "$prefix/${directory.name}",
-                                directory,
-                                includedFiles = files,
-                                contentOverrides = if (manifestBytes != null) {
-                                    mapOf("scan.json" to manifestBytes)
-                                } else {
-                                    emptyMap()
-                                },
-                            )
-                        }
-                    }
-                    CapturePackageZipper.zipNamed(zipSources, output)
-                } ?: error("Could not open the selected export destination")
-            }
-            runOnUiThread {
-                // The export intentionally finishes even if the Activity is
-                // recreated mid-write; only the status update is dropped.
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                result.fold(
-                    onSuccess = {
-                        onStatus(
-                            getString(
-                                R.string.export_done,
-                                it.entryCount,
-                                it.byteCount / (1024.0 * 1024.0),
-                            ),
-                        )
-                    },
-                    onFailure = {
-                        onStatus(getString(R.string.export_failed, it.message ?: it.javaClass.simpleName))
-                    },
-                )
-            }
-        }, "capture-export").start()
-    }
-
-    private fun capturePackages(): List<File> {
-        val root = getExternalFilesDir("captures") ?: File(filesDir, "captures")
-        val captures = root.listFiles { file: File -> file.isDirectory && File(file, "capture.json").exists() }
-            .orEmpty().toList()
-        val scans = ScanProcessor(this).scanRoot()
-            .listFiles { file: File ->
-                if (!file.isDirectory || !File(file, "scan.json").exists()) return@listFiles false
-                runCatching {
-                    JSONObject(File(file, "scan.json").readText()).optString("state") in setOf("review", "accepted")
-                }.getOrDefault(false)
-            }
-            .orEmpty().toList()
-        return (captures + scans).sortedByDescending(File::getName)
-    }
-
-    private fun showExportDialog() {
-        val packages = capturePackages()
-        if (packages.isEmpty()) {
-            onStatus(getString(R.string.export_nothing))
-            return
-        }
-        val labels = buildList {
-            add(getString(R.string.export_all, packages.size))
-            addAll(packages.map { packageDirectory ->
-                val kind = if (packageDirectory.parentFile?.name == "product") "scan" else "acquisition"
-                "$kind · ${packageDirectory.name}"
-            })
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.export_title)
-            .setItems(labels.toTypedArray()) { _, index ->
-                pendingExport = if (index == 0) {
-                    packages
-                } else {
-                    val selected = packages[index - 1]
-                    if (selected.parentFile?.name == "product") {
-                        val acquisitionRoot = getExternalFilesDir("captures") ?: File(filesDir, "captures")
-                        listOfNotNull(selected, File(acquisitionRoot, selected.name).takeIf(File::isDirectory))
-                    } else {
-                        listOf(selected)
-                    }
-                }
-                val suggestedName = if (index == 0) {
-                    "kirsch-captures-${packages.first().name}.zip"
-                } else {
-                    "${packages[index - 1].name}.zip"
-                }
-                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "application/zip"
-                    putExtra(Intent.EXTRA_TITLE, suggestedName)
-                }
-                startActivityForResult(intent, EXPORT_DOCUMENT_REQUEST)
-            }
-            .show()
     }
 
     override fun onCaptureFinished(manifestPath: String) {
         val manifest = File(manifestPath)
-        val status = runCatching { JSONObject(manifest.readText()).getString("status") }.getOrNull()
-        val mode = runCatching { JSONObject(manifest.readText()).getString("mode") }.getOrNull()
+        val record = runCatching { JSONObject(manifest.readText()) }.getOrNull()
+        val status = record?.optString("status")
+        val mode = record?.optString("mode")
         if (status == "accepted" && mode == "yuv-420-888") {
+            pendingReviewScanId = manifest.parentFile?.name
             ScanQueue.enqueue(this, manifest, this)
         } else if (status == "accepted") {
-            onStatus(getString(R.string.raw_acquisition_saved))
+            showStatus(getString(R.string.raw_acquisition_saved))
         } else {
-            onStatus(getString(R.string.capture_not_processed, status ?: "invalid"))
+            showStatus(getString(R.string.capture_not_processed, status ?: "invalid"))
         }
     }
 
+    // ScanQueue.Listener
+
     override fun onScanQueued(captureId: String) {
-        onStatus(getString(R.string.scan_queued, captureId))
+        showStatus(getString(R.string.scan_queued))
     }
 
     override fun onScanReady(result: ScanProcessor.Result) {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
-            statusView.text = getString(R.string.scan_ready, result.manifest.parentFile?.name)
-            reviewButton.isEnabled = true
-            statusView.announceForAccessibility(statusView.text)
+            val scanId = result.manifest.parentFile?.name
+            statusChip.text = getString(R.string.scan_ready)
+            statusChip.visibility = View.VISIBLE
+            statusChip.announceForAccessibility(statusChip.text)
+            if (resumed && scanId != null && scanId == pendingReviewScanId) {
+                pendingReviewScanId = null
+                startActivity(ReviewActivity.intent(this, result.manifest))
+            }
         }
     }
 
     override fun onScanFailed(captureId: String, error: Throwable) {
+        showStatus(getString(R.string.scan_failed, error.message ?: error.javaClass.simpleName))
+    }
+
+    private fun showStatus(message: String) {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
-            statusView.text = getString(R.string.scan_failed, captureId, error.message ?: error.javaClass.simpleName)
-            statusView.announceForAccessibility(statusView.text)
+            statusChip.text = message
+            statusChip.visibility = View.VISIBLE
         }
     }
 
@@ -320,87 +212,34 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
             return
         }
-        controller.start(CaptureProfile.entries[modeSpinner.selectedItemPosition])
+        overlay.showFraming(getString(R.string.framing_hint))
+        controller.start(selectedProfile(preferences(this)))
     }
 
-    private fun buildUi() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF151412.toInt())
-        }
-        textureView = TextureView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-        }
-        root.addView(textureView)
-
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(16))
-        }
-        val title = TextView(this).apply {
-            setText(R.string.capture_title)
-            setTextColor(0xFFF3EDE2.toInt())
-            textSize = 18f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-        controls.addView(title)
-
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        printId = EditText(this).apply {
-            hint = "print-id"
-            setText(R.string.unassigned_print_id)
-            setTextColor(0xFFF3EDE2.toInt())
-            setHintTextColor(0xFFAAA399.toInt())
-            isSingleLine = true
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        modeSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                resources.getStringArray(R.array.capture_modes).toList(),
-            )
-        }
-        row.addView(printId)
-        row.addView(modeSpinner, LinearLayout.LayoutParams(dp(140), ViewGroup.LayoutParams.WRAP_CONTENT))
-        controls.addView(row)
-
-        captureButton = Button(this).apply {
-            setText(R.string.capture_burst)
-        }
-        controls.addView(captureButton)
-
-        exportButton = Button(this).apply {
-            setText(R.string.export_captures)
-        }
-        controls.addView(exportButton)
-
-        reviewButton = Button(this).apply {
-            setText(R.string.review_scans)
-        }
-        controls.addView(reviewButton)
-
-        statusView = TextView(this).apply {
-            setText(R.string.waiting_for_camera)
-            setTextColor(0xFFD7CFC3.toInt())
-            textSize = 12f
-            setPadding(0, dp(8), 0, 0)
-        }
-        controls.addView(statusView)
-        root.addView(controls)
-        setContentView(root)
+    /**
+     * The activity is locked to portrait and the HAL pre-rotates preview
+     * buffers for TextureView, so only the aspect ratio needs correcting:
+     * scale the stretched content back to its true aspect and center-crop.
+     */
+    private fun configureTransform() {
+        if (previewWidth == 0 || previewHeight == 0) return
+        val viewWidth = textureView.width.toFloat()
+        val viewHeight = textureView.height.toFloat()
+        if (viewWidth == 0f || viewHeight == 0f) return
+        val contentWidth = minOf(previewWidth, previewHeight).toFloat()
+        val contentHeight = maxOf(previewWidth, previewHeight).toFloat()
+        val scale = maxOf(viewWidth / contentWidth, viewHeight / contentHeight)
+        val matrix = Matrix()
+        matrix.setScale(
+            contentWidth * scale / viewWidth,
+            contentHeight * scale / viewHeight,
+            viewWidth / 2f,
+            viewHeight / 2f,
+        )
+        textureView.setTransform(matrix)
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private fun showReviewDialog() {
+    private fun showLibraryDialog() {
         val root = ScanProcessor(this).scanRoot()
         val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
             ?.map { File(it, "scan.json") }
@@ -412,16 +251,147 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             ?.sortedByDescending { it.parentFile?.name }
             .orEmpty()
         if (scans.isEmpty()) {
-            onStatus(getString(R.string.no_scans))
+            showStatus(getString(R.string.no_scans))
             return
         }
         val labels = scans.map { manifest ->
             val record = JSONObject(manifest.readText())
-            "${record.getString("scan_id")} · ${record.getString("state")}"
+            val state = if (record.optString("state") == "accepted") {
+                getString(R.string.scan_state_accepted)
+            } else {
+                getString(R.string.scan_state_review)
+            }
+            "${record.getString("scan_id")} · $state"
         }
         AlertDialog.Builder(this)
-            .setTitle(R.string.review_scans)
-            .setItems(labels.toTypedArray()) { _, index -> startActivity(ReviewActivity.intent(this, scans[index])) }
+            .setTitle(R.string.library_title)
+            .setItems(labels.toTypedArray()) { _, index ->
+                startActivity(ReviewActivity.intent(this, scans[index]))
+            }
             .show()
     }
+
+    private fun buildUi() {
+        val root = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
+        textureView = TextureView(this)
+        root.addView(
+            textureView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        overlay = SweepOverlayView(this)
+        root.addView(
+            overlay,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
+        statusChip = TextView(this).apply {
+            setTextColor(0xFFF3EDE2.toInt())
+            textSize = 13f
+            gravity = Gravity.CENTER
+            background = pill(0xB3151412.toInt())
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        root.addView(
+            statusChip,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+            ).apply { topMargin = dp(56) },
+        )
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(20), dp(24), dp(36))
+        }
+        libraryButton = pillButton(getString(R.string.library_button))
+        settingsButton = pillButton(getString(R.string.settings_button))
+        shutterButton = View(this).apply {
+            background = shutterDrawable()
+            contentDescription = getString(R.string.shutter_description)
+            isClickable = true
+            isFocusable = true
+        }
+        controls.addView(
+            libraryButton,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        controls.addView(shutterButton, LinearLayout.LayoutParams(dp(80), dp(80)))
+        controls.addView(
+            settingsButton,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        root.addView(
+            controls,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ),
+        )
+
+        val title = TextView(this).apply {
+            setText(R.string.app_name)
+            setTextColor(0xCCF3EDE2.toInt())
+            textSize = 15f
+            letterSpacing = 0.25f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        root.addView(
+            title,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START,
+            ).apply {
+                topMargin = dp(18)
+                leftMargin = dp(20)
+            },
+        )
+        setContentView(root)
+    }
+
+    private fun pillButton(label: String): TextView = TextView(this).apply {
+        text = label
+        setTextColor(0xFFF3EDE2.toInt())
+        textSize = 14f
+        gravity = Gravity.CENTER
+        background = pill(0xB3151412.toInt())
+        setPadding(dp(18), dp(10), dp(18), dp(10))
+        isClickable = true
+        isFocusable = true
+    }
+
+    private fun pill(color: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(22).toFloat()
+        setColor(color)
+    }
+
+    private fun shutterDrawable(): LayerDrawable {
+        val ring = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0x00000000)
+            setStroke(dp(4), 0xFFF3EDE2.toInt())
+        }
+        val core = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFFF3EDE2.toInt())
+        }
+        return LayerDrawable(arrayOf(ring, core)).apply {
+            val inset = dp(10)
+            setLayerInset(1, inset, inset, inset, inset)
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }

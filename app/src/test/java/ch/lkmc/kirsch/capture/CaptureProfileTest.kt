@@ -17,4 +17,17 @@ class CaptureProfileTest {
         assertEquals(1, CaptureProfile.QUICK_SINGLE.frameCount)
         assertEquals(CaptureMode.YUV, CaptureProfile.QUICK_SINGLE.preferredMode)
     }
+
+    @Test
+    fun sweepIsTheOnlySweepProfileAndUsesNativeCadence() {
+        assertTrue(CaptureProfile.SWEEP.sweep)
+        assertEquals(CaptureMode.YUV, CaptureProfile.SWEEP.preferredMode)
+        // Displacement, not pacing, ends the sweep: no frame-interval request.
+        assertEquals(0L, CaptureProfile.SWEEP.frameIntervalNs)
+        assertTrue(CaptureProfile.SWEEP.frameCount >= 5)
+        assertEquals(
+            listOf(CaptureProfile.SWEEP),
+            CaptureProfile.entries.filter(CaptureProfile::sweep),
+        )
+    }
 }

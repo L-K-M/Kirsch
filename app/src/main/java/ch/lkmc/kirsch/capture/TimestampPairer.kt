@@ -1,16 +1,22 @@
 package ch.lkmc.kirsch.capture
 
-/** Pairs asynchronous image and CaptureResult callbacks by exact sensor timestamp. */
+/**
+ * Pairs asynchronous image and CaptureResult callbacks by exact sensor
+ * timestamp. Pending results are bounded too: during a sweep most frames are
+ * analyzed and discarded without ever producing an image, so their results
+ * must not accumulate.
+ */
 class TimestampPairer<I : Any, R : Any>(
     private val maxPendingImages: Int,
     private val onPair: (I, R) -> Unit,
     private val onDropImage: (I) -> Unit,
+    private val maxPendingResults: Int = maxPendingImages * 8,
 ) {
     private val images = linkedMapOf<Long, I>()
     private val results = linkedMapOf<Long, R>()
 
     init {
-        require(maxPendingImages > 0)
+        require(maxPendingImages > 0 && maxPendingResults > 0)
     }
 
     fun addImage(timestampNs: Long, image: I) {
@@ -41,6 +47,9 @@ class TimestampPairer<I : Any, R : Any>(
                 pair = image to result
             } else {
                 results[timestampNs] = result
+                while (results.size > maxPendingResults) {
+                    results.remove(results.keys.first())
+                }
             }
         }
         pair?.let { onPair(it.first, it.second) }

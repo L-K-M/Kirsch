@@ -39,6 +39,22 @@ class Camera2BurstController(
         fun onStatus(message: String)
         fun onBusyChanged(busy: Boolean)
         fun onCaptureFinished(manifestPath: String)
+
+        /** Sweep progress driven by measured camera motion only. May be called from any thread. */
+        fun onSweepProgress(progress: Float, keptFrames: Int) {}
+
+        /** Reports the active preview buffer size so the view can correct its aspect ratio. */
+        fun onPreviewConfigured(width: Int, height: Int) {}
+    }
+
+    private class SweepSession(
+        val generation: Long,
+        val captureId: String,
+        val analyzer: SweepFrameAnalyzer,
+        val policy: SweepPolicy,
+    ) {
+        @Volatile
+        var stopped = false
     }
 
     private data class CameraConfig(
@@ -95,6 +111,9 @@ class Camera2BurstController(
         const val BURST_TIMEOUT_MS = 30_000L
         const val MAX_YUV_PIXELS = 12_000_000L
         const val MAX_RAW_PIXELS = 16_000_000L
+        // Sweep frames are analyzed and mostly closed immediately, so the
+        // reader needs far fewer full-resolution buffers than a fixed burst.
+        const val SWEEP_READER_IMAGES = 6
     }
 
     private val cameraManager = context.getSystemService(CameraManager::class.java)
@@ -120,6 +139,11 @@ class Camera2BurstController(
     private var activeWriter: CapturePackageWriter? = null
     private var activeWriterGeneration = -1L
     private var activeWrites = 0
+
+    @Volatile
+    private var sweepSession: SweepSession? = null
+    private var sweepFrameIndex = 0
+    private var sweepTargetCount = -1
     private var finishRequested = false
     private var finishSuccess = true
     private var closed = false
@@ -240,7 +264,7 @@ class Camera2BurstController(
                 selected.captureSize.width,
                 selected.captureSize.height,
                 selected.imageFormat,
-                requestedProfile.frameCount + 2,
+                if (requestedProfile.sweep) SWEEP_READER_IMAGES else requestedProfile.frameCount + 2,
             )
             reader.setOnImageAvailableListener({ source -> drainImages(source, openGeneration) }, imageHandler)
             imageReader = reader
@@ -369,6 +393,7 @@ class Camera2BurstController(
                     }
                     captureSession = session
                     startAutomaticPreview(session, camera, selected, openGeneration)
+                    listener.onPreviewConfigured(selected.previewSize.width, selected.previewSize.height)
                     status("Camera ready")
                 }
 
@@ -587,6 +612,10 @@ class Camera2BurstController(
             return
         }
         plan.warnings.forEach(writer::addWarning)
+        if (requestedProfile.sweep) {
+            submitSweep(plan, selected, session, camera, reader, writer, lockedResult)
+            return
+        }
         activePairer = TimestampPairer(
             maxPendingImages = requestedProfile.frameCount + 1,
             onPair = { image, result -> dispatchFrameWrite(writer, image, result) },
@@ -614,6 +643,174 @@ class Camera2BurstController(
             writer.addError("Burst submission failed: ${error.message}")
             requestFinish(success = false)
         }
+    }
+
+    private fun submitSweep(
+        plan: LockPlan,
+        selected: CameraConfig,
+        session: CameraCaptureSession,
+        camera: CameraDevice,
+        reader: ImageReader,
+        writer: CapturePackageWriter,
+        lockedResult: TotalCaptureResult,
+    ) {
+        sweepFrameIndex = 0
+        sweepTargetCount = -1
+        val analyzer = SweepFrameAnalyzer()
+        val sweep = SweepSession(
+            plan.generation,
+            plan.captureId,
+            analyzer,
+            SweepPolicy(analyzer.analysisWidth),
+        )
+        activePairer = TimestampPairer(
+            maxPendingImages = 4,
+            onPair = { image, tagged ->
+                // Kept frames are indexed in pairing order, which is
+                // timestamp order because both callbacks run on the camera
+                // handler in monotonic order.
+                val indexed = TaggedCaptureResult(
+                    tagged.tag.copy(frameIndex = sweepFrameIndex++),
+                    tagged.result,
+                )
+                dispatchFrameWrite(writer, image, indexed)
+            },
+            onDropImage = Image::close,
+        )
+        try {
+            session.stopRepeating()
+            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                // The preview stays live during the sweep so the user can
+                // keep the print framed while moving.
+                addTarget(previewSurface ?: error("Preview surface missing"))
+                addTarget(reader.surface)
+                applyLockedValues(this, selected, lockedResult)
+                setTag(BurstFrameTag(plan.generation, plan.captureId, -1))
+            }.build()
+            sweepSession = sweep
+            status("Sweep started")
+            listener.onSweepProgress(0f, 0)
+            session.setSingleRepeatingRequest(request, cameraExecutor, createSweepCallback(plan, writer, sweep))
+            cameraHandler.postDelayed({
+                // Fires for a sweep that never completed AND for a completed
+                // sweep whose final write or result never landed.
+                if (activeWriter === writer && sweepSession === sweep) {
+                    sweep.stopped = true
+                    writer.addError("Sweep timeout before completion")
+                    requestFinish(success = false)
+                }
+            }, BURST_TIMEOUT_MS)
+        } catch (error: Exception) {
+            sweepSession = null
+            imageHandler.post { analyzer.release() }
+            writer.addError("Sweep submission failed: ${error.message}")
+            requestFinish(success = false)
+        }
+    }
+
+    private fun createSweepCallback(
+        plan: LockPlan,
+        writer: CapturePackageWriter,
+        sweep: SweepSession,
+    ) = object : CameraCaptureSession.CaptureCallback() {
+        private fun isCurrent(session: CameraCaptureSession): Boolean =
+            plan.generation == generation &&
+                activeWriter === writer &&
+                captureSession === session
+
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult,
+        ) {
+            // Results keep flowing even after the sweep stops: a kept image
+            // from the final frames may still be waiting for its result.
+            if (!isCurrent(session)) return
+            val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+            activePairer?.addResult(
+                timestamp,
+                TaggedCaptureResult(BurstFrameTag(plan.generation, plan.captureId, -1), result),
+            )
+        }
+
+        override fun onCaptureFailed(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            failure: CaptureFailure,
+        ) {
+            if (!isCurrent(session) || sweep.stopped) return
+            // A sweep tolerates individual frame failures; the policy simply
+            // never sees the frame. Only the overall timeout is fatal.
+            writer.addWarning("Sweep frame failed: reason=${failure.reason}")
+        }
+    }
+
+    private fun analyzeSweepImage(sweep: SweepSession, image: Image, imageGeneration: Long) {
+        val timestamp = image.timestamp
+        val measurement = try {
+            sweep.analyzer.measure(image)
+        } catch (error: Exception) {
+            image.close()
+            return
+        }
+        val decision = sweep.policy.observe(
+            measurement.shiftX,
+            measurement.shiftY,
+            measurement.sharpness,
+            timestamp,
+        )
+        if (decision.keep && !sweep.stopped) {
+            cameraHandler.post {
+                if (imageGeneration != generation || sweepSession !== sweep || activePairer == null) {
+                    image.close()
+                } else {
+                    activePairer?.addImage(timestamp, image)
+                }
+            }
+        } else {
+            image.close()
+        }
+        listener.onSweepProgress(decision.progress, decision.keptCount)
+        if (decision.complete && !sweep.stopped) {
+            sweep.stopped = true
+            cameraHandler.post { finishSweep(sweep, decision.keptCount, decision.timedOut) }
+        }
+    }
+
+    private fun finishSweep(sweep: SweepSession, keptCount: Int, timedOut: Boolean) {
+        if (sweepSession !== sweep || generation != sweep.generation) return
+        val writer = activeWriter ?: return
+        if (writer.captureId != sweep.captureId) return
+        try {
+            captureSession?.stopRepeating()
+        } catch (_: CameraAccessException) {
+            // The session is torn down elsewhere; finalization proceeds.
+        }
+        if (timedOut) {
+            writer.addWarning(
+                "Sweep ended at the time limit before reaching the displacement target; " +
+                    "expect residual glare where no view was unsaturated",
+            )
+        }
+        if (keptCount == 0) {
+            writer.addError("Sweep kept no frames")
+            requestFinish(success = false)
+            return
+        }
+        writer.setRequestedFrameCount(keptCount)
+        sweepTargetCount = keptCount
+        status("Saving $keptCount sweep frames")
+        if (writer.persistedFrameCount() == keptCount && activeWrites == 0) {
+            requestFinish(success = finishSuccess)
+        }
+    }
+
+    private fun clearSweep() {
+        val sweep = sweepSession ?: return
+        sweep.stopped = true
+        sweepSession = null
+        sweepTargetCount = -1
+        imageHandler.post { sweep.analyzer.release() }
     }
 
     private fun applyLockedValues(
@@ -759,6 +956,11 @@ class Camera2BurstController(
             } catch (_: IllegalStateException) {
                 null
             } ?: break
+            val sweep = sweepSession
+            if (sweep != null && sweep.generation == imageGeneration) {
+                if (sweep.stopped) image.close() else analyzeSweepImage(sweep, image, imageGeneration)
+                continue
+            }
             cameraHandler.post {
                 if (imageGeneration != generation || activePairer == null) {
                     image.close()
@@ -792,7 +994,8 @@ class Camera2BurstController(
                 activeWrites -= 1
                 if (!success) finishSuccess = false
                 if (activeWrites == 0) closeRetiredReaders()
-                if (count == requestedProfile.frameCount) requestFinish(success = finishSuccess)
+                val targetCount = if (requestedProfile.sweep) sweepTargetCount else requestedProfile.frameCount
+                if (targetCount > 0 && count == targetCount) requestFinish(success = finishSuccess)
                 else if (finishRequested && activeWrites == 0) finalizeActiveWriter()
             }
         }
@@ -808,6 +1011,7 @@ class Camera2BurstController(
 
     private fun finalizeActiveWriter() {
         val writer = activeWriter ?: return
+        clearSweep()
         val shouldRestorePreview = activeWriterGeneration == generation
         val manifest = try {
             writer.finish(finishSuccess)
@@ -874,6 +1078,7 @@ class Camera2BurstController(
 
     private fun closeCameraResources(markActiveCaptureFailed: Boolean) {
         lockPlan = null
+        clearSweep()
         if (markActiveCaptureFailed && activeWriter != null) {
             activeWriter?.addError("Camera lifecycle ended before burst completion")
             activeWriterGeneration = -1L

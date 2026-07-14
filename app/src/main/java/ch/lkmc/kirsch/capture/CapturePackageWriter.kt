@@ -21,7 +21,7 @@ class CapturePackageWriter(
     val captureId: String,
     private val printId: String,
     private val mode: CaptureMode,
-    private val requestedFrameCount: Int,
+    requestedFrameCount: Int,
     private val characteristics: CameraCharacteristics,
     cameraJson: JSONObject,
     private val captureProfile: CaptureProfile,
@@ -40,6 +40,22 @@ class CapturePackageWriter(
     private val warnings = Collections.synchronizedList(mutableListOf<String>())
     private val deliveredFrameCount = AtomicInteger()
     private val cameraRecord: JSONObject
+
+    /**
+     * Sweep captures decide their final frame count while running; the value
+     * recorded in the manifest is fixed at the moment the sweep stops, before
+     * finish() evaluates acceptance.
+     */
+    @Volatile
+    var requestedFrameCount: Int = requestedFrameCount
+        private set
+
+    fun setRequestedFrameCount(count: Int) {
+        require(count >= 1)
+        requestedFrameCount = count
+    }
+
+    fun persistedFrameCount(): Int = frameRecords.size
 
     init {
         check(framesDirectory.mkdirs() || framesDirectory.isDirectory) {

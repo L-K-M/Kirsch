@@ -1,30 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Kirsch</string>
-    <string name="capture_title">KIRSCH / GLARE-REDUCED SCAN</string>
     <string name="unassigned_print_id">print-unassigned</string>
-    <string name="capture_burst">START SCAN</string>
-    <string name="waiting_for_camera">Waiting for camera permission and preview surface</string>
-    <string name="capture_package_path">Validated package can be copied from:\n%1$s</string>
-    <string name="export_captures">EXPORT PACKAGES</string>
+
+    <!-- Scanner screen -->
+    <string name="camera_permission_needed">Kirsch needs camera access to scan photos</string>
+    <string name="framing_hint">Fill the frame with the photo, then tap the shutter</string>
+    <string name="sweep_hint">Move the phone slowly across the photo\nKeep the whole photo in view</string>
+    <string name="shutter_description">Scan the photo</string>
+    <string name="library_button">Scans</string>
+    <string name="settings_button">Settings</string>
+    <string name="library_title">Your scans</string>
+    <string name="no_scans">No scans yet — scan your first photo</string>
+    <string name="scan_state_review">ready to review</string>
+    <string name="scan_state_accepted">accepted</string>
+    <string name="scan_queued">Photo captured — processing…</string>
+    <string name="scan_ready">Scan ready</string>
+    <string name="scan_failed">Processing failed: %1$s</string>
+    <string name="capture_not_processed">Capture ended with status %1$s; the acquisition is retained but not processed</string>
+    <string name="raw_acquisition_saved">RAW acquisition saved. Processing is disabled until the DNG color pipeline is validated.</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_capture_section">CAPTURE</string>
+    <string name="settings_capture_caption">The glare-removal sweep is the default. It keeps capturing while you move the phone and finishes once the views differ enough to remove reflections. The other modes exist for benchmarking and diagnostics.</string>
+    <string name="settings_benchmark_section">BENCHMARK</string>
+    <string name="settings_print_id_hint">Benchmark print ID (optional)</string>
+    <string name="settings_print_id_caption">Recorded in capture packages so benchmark scans can be traced to a physical print. Leave empty outside benchmark sessions.</string>
+    <string name="settings_data_section">DATA</string>
+    <string name="settings_export_caption">Zips acquisition and scan packages to a location you choose, for offline analysis. Scans export together with their source captures.</string>
+    <string name="settings_capabilities_caption">Shows which processing features are available on this build, with recorded reasons for anything unavailable.</string>
+    <string name="settings_privacy_note">Kirsch has no network permission. Photos, captures, and scans stay on this device unless you export them.</string>
+
+    <!-- Export -->
+    <string name="export_captures">Export packages…</string>
     <string name="export_title">Export as zip</string>
     <string name="export_all">All packages (%1$d)</string>
     <string name="export_nothing">No completed acquisition or scan packages to export</string>
     <string name="export_running">Exporting…</string>
     <string name="export_done">Exported %1$d files (%2$.1f MB source)</string>
     <string name="export_failed">Export failed: %1$s</string>
-    <string-array name="capture_modes">
-        <item>Quality YUV sweep</item>
-        <item>RAW acquisition only</item>
-        <item>Quick single frame</item>
-    </string-array>
-    <string name="review_scans">REVIEW SCANS</string>
-    <string name="no_scans">No processed scans are ready for review</string>
-    <string name="scan_queued">Capture saved. Processing queued: %1$s</string>
-    <string name="scan_ready">Scan ready for review: %1$s</string>
-    <string name="scan_failed">Processing failed for %1$s: %2$s</string>
-    <string name="capture_not_processed">Capture package status is %1$s; failed acquisitions are retained but not queued</string>
-    <string name="raw_acquisition_saved">RAW acquisition saved. Product processing is disabled until the DNG color pipeline is validated.</string>
+
+    <!-- Review screen -->
     <string name="review_title">Review scan</string>
     <string name="review_status">Output: %1$s · state: %2$s</string>
     <string name="corner_editor_help">Drag all four handles to the true print corners. Manual correction remains available even when automatic detection succeeds.</string>

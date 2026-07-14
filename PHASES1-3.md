@@ -24,6 +24,29 @@ Evidence boundary:
 - RAW/DNG acquisition is implemented and retained, but product RAW conversion is disabled. Phase 0 did not verify DNG decoding, demosaic, black-level correction, color transforms, or high-bit-depth output. Promoting decoded 8-bit pixels is not treated as a RAW pipeline.
 - The default product path is therefore the evidenced YUV path. Its TIFF stores 16-bit samples but records the effective 8-bit source depth.
 
+### Amendment (2026-07-14): displacement-driven sweep
+
+The GRL-AL10 product sweep audit
+([`benchmark/reports/2026-07-14-grl-al10-product-sweep-audit.md`](benchmark/reports/2026-07-14-grl-al10-product-sweep-audit.md))
+showed that a fixed nine-request burst is not a sweep on devices without
+manual sensor control: frames arrived at the native 40ms cadence, the
+28-43px view displacement stayed far below the specular footprint, and
+fusion — while still exactly reaching the all-frame saturation floor —
+could not remove the dominant glare core.
+
+In response, the default product capture is now a displacement-driven
+freehand sweep (`SweepPolicy` + `SweepFrameAnalyzer`): a repeating capture
+runs while the user moves the phone, frames are kept only when they are
+displaced from the last kept frame and pass a relative-sharpness gate, and
+the capture completes when the kept views span a target fraction of the
+frame (minimum five frames, maximum twelve, hard time limit). Progress
+shown to the user is a function of measured camera motion only — the
+patent-relevant constraint that capture guidance is never glare-driven is
+preserved. The fixed nine-frame burst remains selectable as the benchmark
+comparator. Whether the enforced displacement is sufficient on real glossy
+prints is a physical question for the next capture round, not something a
+green build establishes.
+
 ## Phase 2
 
 Implemented local/evidenced paths:
