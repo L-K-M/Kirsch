@@ -8,7 +8,7 @@ import org.junit.Test
 class SweepPolicyTest {
     private fun policy(
         minFrames: Int = 5,
-        maxFrames: Int = 20,
+        maxFrames: Int = 22,
         maxDurationNs: Long = 20_000_000_000L,
     ) = SweepPolicy(
         frameWidth = 256,
@@ -68,7 +68,7 @@ class SweepPolicyTest {
         assertFalse(decision.endedEarly)
         assertEquals(1f, decision.progress)
         assertTrue("kept ${decision.keptCount}", decision.keptCount >= 5)
-        assertTrue("kept ${decision.keptCount}", decision.keptCount <= 20)
+        assertTrue("kept ${decision.keptCount}", decision.keptCount <= 22)
     }
 
     @Test
@@ -96,6 +96,21 @@ class SweepPolicyTest {
         // otherwise wiggling would burn the budget without real coverage.
         val creep = policy.observe(0.5, -7.0, 100.0, 540_000_000L)
         assertFalse(creep.keep)
+    }
+
+    @Test
+    fun wastedStartingWiggleStillLeavesBudgetForFullCoverage() {
+        // Worst case for the frame budget: the minFrames free keeps are
+        // spent on a diagonal jitter that adds almost no coverage, then the
+        // user sweeps a full cross. The budget must still allow completion.
+        val policy = policy()
+        val jitter = listOf(4.6 to -4.6, -4.6 to 4.6, 4.6 to -4.6, -4.6 to 4.6)
+        val cross = leg(10, 3.0, 0.0) + leg(20, -3.0, 0.0) + leg(10, 3.0, 0.0) +
+            leg(10, 0.0, 3.0) + leg(20, 0.0, -3.0)
+        val decision = sweep(policy, jitter + cross)
+        assertTrue(decision.complete)
+        assertFalse("ended early with kept=${decision.keptCount}", decision.endedEarly)
+        assertTrue(decision.keptCount <= 22)
     }
 
     @Test

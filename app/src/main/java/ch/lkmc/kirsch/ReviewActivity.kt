@@ -61,8 +61,13 @@ class ReviewActivity : Activity() {
             },
         )
         val accepted = manifest.optString("state") == "accepted"
-        status.text = if (accepted) {
+        val exported = manifest.optJSONObject("extensions")?.has("gallery_uri") == true
+        status.text = if (accepted && exported) {
             getString(R.string.scan_accepted)
+        } else if (accepted) {
+            // Accepted before the photo-library export existed: locked, but
+            // never claimed to be in the gallery.
+            getString(R.string.scan_locked)
         } else {
             getString(
                 R.string.review_status,
@@ -216,10 +221,15 @@ class ReviewActivity : Activity() {
                 }
                 // The slow MediaStore write runs outside the manifest lock;
                 // accept() re-checks the state and records the export
-                // atomically, so a race can at worst duplicate a gallery
-                // image, never corrupt the manifest.
+                // atomically. If a race loses that re-check, its gallery row
+                // is removed so no orphan duplicate stays behind.
                 val galleryUri = exportToGallery(record, root)
-                DerivativeStore.accept(manifestFile, galleryUri.toString())
+                try {
+                    DerivativeStore.accept(manifestFile, galleryUri.toString())
+                } catch (error: Throwable) {
+                    contentResolver.delete(galleryUri, null, null)
+                    throw error
+                }
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread

@@ -59,6 +59,7 @@
     <string name="review_save_caption">Adds the finished scan to your photo library (Pictures/Kirsch) and locks this version. Sources stay on the device for reprocessing.</string>
     <string name="saving_scan">Saving to your photo library…</string>
     <string name="scan_accepted">Saved to your photo library (Pictures/Kirsch). This scan is now locked; its sources remain on the device.</string>
+    <string name="scan_locked">This scan is accepted and locked; its sources remain on the device.</string>
     <string name="review_scale_caption">Optional: record the print’s physical size so the scan carries true PPI metadata.</string>
     <string name="feature_status">CAPABILITIES</string>
     <string name="create_restored_derivative">Create %1$s restored derivative</string>

@@ -37,8 +37,14 @@ class SweepPolicy(
         val minKeepSpacingFraction: Double = 0.025,
         /** Fusion needs at least this many views before completion. */
         val minFrames: Int = 5,
-        /** Hard cap on persisted frames per sweep. */
-        val maxFrames: Int = 20,
+        /**
+         * Hard cap on persisted frames per sweep. Worst case for coverage is
+         * minFrames free keeps that extend nothing plus
+         * 4 * ceil(directionReachFraction / minKeepSpacingFraction) = 16
+         * extension keeps — 21 total; 22 leaves margin so a compliant sweep
+         * can always reach coverage before the cap.
+         */
+        val maxFrames: Int = 22,
         /** The sweep ends with whatever was gathered after this long. */
         val maxDurationNs: Long = 20_000_000_000L,
         /** Frames sharper than this fraction of the recent best pass the stability gate. */

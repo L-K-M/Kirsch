@@ -669,7 +669,12 @@ class Camera2BurstController(
             plan.generation,
             plan.captureId,
             analyzer,
-            SweepPolicy(analyzer.analysisWidth),
+            // The profile's frame count is the single source of truth for
+            // the sweep budget, so package metadata matches policy behavior.
+            SweepPolicy(
+                analyzer.analysisWidth,
+                SweepPolicy.Settings(maxFrames = requestedProfile.frameCount),
+            ),
         )
         activePairer = TimestampPairer(
             maxPendingImages = 4,
