@@ -115,10 +115,21 @@ object DerivativeStore {
         }
     }
 
-    fun accept(scanManifest: File) = ScanManifestStore.locked {
+    /**
+     * Accepts (locks) a scan, optionally recording the photo-library export
+     * in the same atomic manifest transaction: the state re-check, the state
+     * flip, and the export record land together or not at all.
+     */
+    fun accept(scanManifest: File, galleryUri: String? = null) = ScanManifestStore.locked {
         val manifest = JSONObject(scanManifest.readText())
         require(manifest.getString("state") == "review") { "Only a scan in review can be accepted" }
         manifest.put("state", "accepted").put("accepted_utc", Instant.now().toString())
+        if (galleryUri != null) {
+            val extensions = manifest.optJSONObject("extensions") ?: JSONObject()
+            extensions.put("gallery_uri", galleryUri)
+            extensions.put("gallery_saved_utc", Instant.now().toString())
+            manifest.put("extensions", extensions)
+        }
         ScanManifestStore.write(scanManifest, manifest)
     }
 

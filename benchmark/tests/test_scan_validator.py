@@ -106,10 +106,16 @@ class ScanPackageValidatorTest(unittest.TestCase):
                         "sha256": digest,
                     }
                 ],
+                "extensions": {"gallery_uri": "content://media/external_primary/images/media/1"},
             }
             path = root / "scan.json"
             path.write_text(json.dumps(manifest))
             self.assertEqual([], validate_scan_package(path))
+            path.write_text(json.dumps(dict(manifest, extensions="not-an-object")))
+            self.assertIn(
+                "TYPE_OBJECT",
+                [issue.code for issue in validate_scan_package(path)],
+            )
 
     def test_rejects_mutated_derivative(self):
         with tempfile.TemporaryDirectory() as directory:

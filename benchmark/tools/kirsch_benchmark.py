@@ -1302,6 +1302,7 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
         "archival_scale",
         "derivatives",
         "error",
+        "extensions",
     }
     if not validator.require_keys(data, "", required):
         return sorted(validator.issues)
@@ -1338,6 +1339,8 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
     for field in ("source_retained", "used_fusion"):
         if field in data and not isinstance(data[field], bool):
             validator.issue("TYPE_BOOLEAN", f"/{field}", "must be a boolean")
+    if "extensions" in data and not isinstance(data["extensions"], dict):
+        validator.issue("TYPE_OBJECT", "/extensions", "must be an object")
 
     def validate_quad(value: Any, pointer: str) -> None:
         if not isinstance(value, dict):

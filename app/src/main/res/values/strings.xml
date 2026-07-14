@@ -5,8 +5,8 @@
 
     <!-- Scanner screen -->
     <string name="camera_permission_needed">Kirsch needs camera access to scan photos</string>
-    <string name="framing_hint">Fill the frame with the photo, then tap the shutter</string>
-    <string name="sweep_hint">Move the phone slowly across the photo\nKeep the whole photo in view</string>
+    <string name="framing_hint">Fill the frame with the photo,\nthen tap the shutter</string>
+    <string name="sweep_hint">Move the phone in slow circles\nuntil the ring is complete</string>
     <string name="shutter_description">Scan the photo</string>
     <string name="library_button">Scans</string>
     <string name="settings_button">Settings</string>
@@ -43,19 +43,30 @@
 
     <!-- Review screen -->
     <string name="review_title">Review scan</string>
-    <string name="review_status">Output: %1$s · state: %2$s</string>
-    <string name="corner_editor_help">Drag all four handles to the true print corners. Manual correction remains available even when automatic detection succeeds.</string>
+    <string name="review_status">%1$s — adjust the corners if needed, then save</string>
+    <string name="review_output_fused">Glare-reduced scan ready</string>
+    <string name="review_output_single">Single-frame scan ready (fusion was not possible)</string>
+    <string name="review_corners_section">PRINT CORNERS</string>
+    <string name="corner_editor_help">Drag a handle to its print corner — a magnifier shows the exact spot while you drag.</string>
+    <string name="review_corners_caption">Applies the corner correction and updates the scan. You can re-adjust and apply again.</string>
     <string name="corner_editor_description">Manual print corner editor with four draggable handles</string>
     <string name="apply_manual_corners">APPLY CORNERS</string>
-    <string name="applying_manual_corners">Applying manual corner correction…</string>
-    <string name="accept_scan">ACCEPT</string>
-    <string name="scan_accepted">Scan accepted. Acquisition sources and derivative history were retained.</string>
+    <string name="applying_manual_corners">Applying corner correction…</string>
+    <string name="review_enhance_section">ENHANCE (OPTIONAL)</string>
+    <string name="review_enhance_caption">Each enhancement is saved as a new copy — the original scan is always kept.</string>
+    <string name="review_finish_section">FINISH</string>
+    <string name="accept_scan">SAVE TO PHOTOS</string>
+    <string name="review_save_caption">Adds the finished scan to your photo library (Pictures/Kirsch) and locks this version. Sources stay on the device for reprocessing.</string>
+    <string name="saving_scan">Saving to your photo library…</string>
+    <string name="scan_accepted">Saved to your photo library (Pictures/Kirsch). This scan is now locked; its sources remain on the device.</string>
+    <string name="scan_locked">This scan is accepted and locked; its sources remain on the device.</string>
+    <string name="review_scale_caption">Optional: record the print’s physical size so the scan carries true PPI metadata.</string>
     <string name="feature_status">CAPABILITIES</string>
     <string name="create_restored_derivative">Create %1$s restored derivative</string>
-    <string name="processing_recipe">Creating %1$s restored derivative…</string>
-    <string name="derivative_created">Derivative created: %1$s</string>
+    <string name="processing_recipe">Creating %1$s copy…</string>
+    <string name="derivative_created">Saved a new copy: %1$s</string>
     <string name="processing_failed">Processing failed: %1$s</string>
-    <string name="archival_scale">ARCHIVAL SCALE</string>
+    <string name="archival_scale">PRINT SIZE…</string>
     <string name="width_mm">Confirmed print width (mm)</string>
     <string name="height_mm">Confirmed print height (mm)</string>
     <string name="confirmed_dimensions">User-confirmed physical dimensions</string>

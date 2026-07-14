@@ -157,11 +157,11 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         }
     }
 
-    override fun onSweepProgress(progress: Float, keptFrames: Int) {
+    override fun onSweepProgress(progress: Float, keptFrames: Int, directions: FloatArray) {
         runOnUiThread {
             if (isFinishing || isDestroyed || !capturing) return@runOnUiThread
             overlay.showSweeping(getString(R.string.sweep_hint))
-            overlay.setSweepProgress(progress)
+            overlay.setSweepProgress(progress, directions)
         }
     }
 

@@ -47,6 +47,18 @@ comparator. Whether the enforced displacement is sufficient on real glossy
 prints is a physical question for the next capture round, not something a
 green build establishes.
 
+Same-day field feedback from the first product sweeps tightened this
+further: a single displacement-span target was satisfiable by
+one-directional motion, which does not diversify perspectives across the
+print. Completion now requires directional coverage — the kept views must
+reach a displacement target in each of four directions around the sweep's
+start — shown as a four-segment ring. The constraint remains motion-only:
+no visual target is placed at print corners (deliberately unlike the
+corner-dot pattern in the Google Family B claims), and nothing in guidance
+reacts to glare. Finishing a scan now also exports the output JPEG to the
+device photo library via MediaStore, recorded in the scan manifest's
+`extensions`.
+
 ## Phase 2
 
 Implemented local/evidenced paths:

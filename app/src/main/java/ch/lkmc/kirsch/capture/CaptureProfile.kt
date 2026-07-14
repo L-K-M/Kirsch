@@ -17,7 +17,9 @@ enum class CaptureProfile(
      */
     SWEEP(
         CaptureMode.YUV,
-        frameCount = 12,
+        // Must equal SweepPolicy.Settings.maxFrames; the controller passes
+        // this value into the policy so the two cannot drift apart.
+        frameCount = 22,
         frameIntervalNs = 0L,
         manifestValue = "product-sweep",
         displayName = "Glare-removal sweep",
