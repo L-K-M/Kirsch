@@ -84,4 +84,29 @@ class CapturePackageZipperTest {
         assertEquals(0L, result.byteCount)
         assertEquals(0, readEntries(out.toByteArray()).size)
     }
+
+    @Test
+    fun namedSourcesKeepAcquisitionAndDerivativeRootsSeparate() {
+        val root = Files.createTempDirectory("zipper-product").toFile()
+        try {
+            val acquisition = root.resolve("captures/scan-a").apply { mkdirs() }
+            acquisition.resolve("capture.json").writeText("capture")
+            val scan = root.resolve("scans/scan-a").apply { mkdirs() }
+            scan.resolve("scan.json").writeText("scan")
+            val out = ByteArrayOutputStream()
+            CapturePackageZipper.zipNamed(
+                listOf(
+                    CapturePackageZipper.Source("acquisitions/scan-a", acquisition),
+                    CapturePackageZipper.Source("scans/scan-a", scan),
+                ),
+                out,
+            )
+            assertEquals(
+                listOf("acquisitions/scan-a/capture.json", "scans/scan-a/scan.json"),
+                readEntries(out.toByteArray()).keys.toList(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

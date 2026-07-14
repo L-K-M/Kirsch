@@ -19,11 +19,15 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import com.example.kirsch.capture.Camera2BurstController
-import com.example.kirsch.capture.CaptureMode
 import com.example.kirsch.capture.CapturePackageZipper
+import com.example.kirsch.capture.CaptureProfile
+import com.example.kirsch.scan.ScanProcessor
+import com.example.kirsch.scan.ScanQueue
+import com.example.kirsch.scan.ScanManifestStore
 import java.io.File
+import org.json.JSONObject
 
-class MainActivity : Activity(), Camera2BurstController.Listener {
+class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.Listener {
     private companion object {
         const val CAMERA_PERMISSION_REQUEST = 100
         const val EXPORT_DOCUMENT_REQUEST = 101
@@ -35,6 +39,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
     private lateinit var modeSpinner: Spinner
     private lateinit var captureButton: Button
     private lateinit var exportButton: Button
+    private lateinit var reviewButton: Button
     private lateinit var statusView: TextView
     private lateinit var controller: Camera2BurstController
     private var resumed = false
@@ -78,12 +83,16 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         exportButton.setOnClickListener {
             showExportDialog()
         }
+        reviewButton.setOnClickListener {
+            showReviewDialog()
+        }
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
         startCameraIfReady()
+        ScanQueue.resumePending(this, this)
     }
 
     override fun onPause() {
@@ -122,6 +131,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         runOnUiThread {
             captureButton.isEnabled = !busy
             exportButton.isEnabled = !busy
+            reviewButton.isEnabled = !busy
             modeSpinner.isEnabled = !busy
             printId.isEnabled = !busy
         }
@@ -150,7 +160,45 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         Thread({
             val result = runCatching {
                 contentResolver.openOutputStream(destination)?.use { output ->
-                    CapturePackageZipper.zip(sources, output)
+                    val zipSources = ScanManifestStore.locked {
+                        sources.map { directory ->
+                            val prefix = if (directory.parentFile?.name == "product") "scans" else "acquisitions"
+                            val manifest = File(directory, "scan.json")
+                            val manifestBytes = manifest.takeIf(File::isFile)?.readBytes()
+                            val files = if (manifestBytes != null) {
+                                val record = JSONObject(manifestBytes.decodeToString())
+                                buildSet {
+                                    add("scan.json")
+                                    listOf("working_image_path", "processing_report").forEach { field ->
+                                        record.optString(field).takeIf(String::isNotBlank)?.let(::add)
+                                    }
+                                    val derivatives = record.optJSONArray("derivatives")
+                                    if (derivatives != null) {
+                                        for (index in 0 until derivatives.length()) {
+                                            add(derivatives.getJSONObject(index).getString("path"))
+                                        }
+                                    }
+                                }.map { relative -> File(directory, relative) }.filter(File::isFile)
+                            } else {
+                                directory.walkTopDown()
+                                    .filter {
+                                        it.isFile && !it.name.endsWith(".partial") && !it.name.contains(".partial.")
+                                    }
+                                    .toList()
+                            }
+                            CapturePackageZipper.Source(
+                                "$prefix/${directory.name}",
+                                directory,
+                                includedFiles = files,
+                                contentOverrides = if (manifestBytes != null) {
+                                    mapOf("scan.json" to manifestBytes)
+                                } else {
+                                    emptyMap()
+                                },
+                            )
+                        }
+                    }
+                    CapturePackageZipper.zipNamed(zipSources, output)
                 } ?: error("Could not open the selected export destination")
             }
             runOnUiThread {
@@ -177,9 +225,17 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
 
     private fun capturePackages(): List<File> {
         val root = getExternalFilesDir("captures") ?: File(filesDir, "captures")
-        return root.listFiles { file: File -> file.isDirectory && File(file, "capture.json").exists() }
-            ?.sortedByDescending(File::getName)
-            ?: emptyList()
+        val captures = root.listFiles { file: File -> file.isDirectory && File(file, "capture.json").exists() }
+            .orEmpty().toList()
+        val scans = ScanProcessor(this).scanRoot()
+            .listFiles { file: File ->
+                if (!file.isDirectory || !File(file, "scan.json").exists()) return@listFiles false
+                runCatching {
+                    JSONObject(File(file, "scan.json").readText()).optString("state") in setOf("review", "accepted")
+                }.getOrDefault(false)
+            }
+            .orEmpty().toList()
+        return (captures + scans).sortedByDescending(File::getName)
     }
 
     private fun showExportDialog() {
@@ -190,12 +246,25 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         }
         val labels = buildList {
             add(getString(R.string.export_all, packages.size))
-            addAll(packages.map(File::getName))
+            addAll(packages.map { packageDirectory ->
+                val kind = if (packageDirectory.parentFile?.name == "product") "scan" else "acquisition"
+                "$kind · ${packageDirectory.name}"
+            })
         }
         AlertDialog.Builder(this)
             .setTitle(R.string.export_title)
             .setItems(labels.toTypedArray()) { _, index ->
-                pendingExport = if (index == 0) packages else listOf(packages[index - 1])
+                pendingExport = if (index == 0) {
+                    packages
+                } else {
+                    val selected = packages[index - 1]
+                    if (selected.parentFile?.name == "product") {
+                        val acquisitionRoot = getExternalFilesDir("captures") ?: File(filesDir, "captures")
+                        listOfNotNull(selected, File(acquisitionRoot, selected.name).takeIf(File::isDirectory))
+                    } else {
+                        listOf(selected)
+                    }
+                }
                 val suggestedName = if (index == 0) {
                     "kirsch-captures-${packages.first().name}.zip"
                 } else {
@@ -212,8 +281,36 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
     }
 
     override fun onCaptureFinished(manifestPath: String) {
+        val manifest = File(manifestPath)
+        val status = runCatching { JSONObject(manifest.readText()).getString("status") }.getOrNull()
+        val mode = runCatching { JSONObject(manifest.readText()).getString("mode") }.getOrNull()
+        if (status == "accepted" && mode == "yuv-420-888") {
+            ScanQueue.enqueue(this, manifest, this)
+        } else if (status == "accepted") {
+            onStatus(getString(R.string.raw_acquisition_saved))
+        } else {
+            onStatus(getString(R.string.capture_not_processed, status ?: "invalid"))
+        }
+    }
+
+    override fun onScanQueued(captureId: String) {
+        onStatus(getString(R.string.scan_queued, captureId))
+    }
+
+    override fun onScanReady(result: ScanProcessor.Result) {
         runOnUiThread {
-            statusView.text = getString(R.string.capture_package_path, manifestPath)
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            statusView.text = getString(R.string.scan_ready, result.manifest.parentFile?.name)
+            reviewButton.isEnabled = true
+            statusView.announceForAccessibility(statusView.text)
+        }
+    }
+
+    override fun onScanFailed(captureId: String, error: Throwable) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            statusView.text = getString(R.string.scan_failed, captureId, error.message ?: error.javaClass.simpleName)
+            statusView.announceForAccessibility(statusView.text)
         }
     }
 
@@ -223,8 +320,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
             return
         }
-        val mode = if (modeSpinner.selectedItemPosition == 0) CaptureMode.RAW else CaptureMode.YUV
-        controller.start(mode)
+        controller.start(CaptureProfile.entries[modeSpinner.selectedItemPosition])
     }
 
     private fun buildUi() {
@@ -286,6 +382,11 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
         }
         controls.addView(exportButton)
 
+        reviewButton = Button(this).apply {
+            setText(R.string.review_scans)
+        }
+        controls.addView(reviewButton)
+
         statusView = TextView(this).apply {
             setText(R.string.waiting_for_camera)
             setTextColor(0xFFD7CFC3.toInt())
@@ -298,4 +399,29 @@ class MainActivity : Activity(), Camera2BurstController.Listener {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun showReviewDialog() {
+        val root = ScanProcessor(this).scanRoot()
+        val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
+            ?.map { File(it, "scan.json") }
+            ?.filter { manifest ->
+                runCatching {
+                    JSONObject(manifest.readText()).optString("state") in setOf("review", "accepted")
+                }.getOrDefault(false)
+            }
+            ?.sortedByDescending { it.parentFile?.name }
+            .orEmpty()
+        if (scans.isEmpty()) {
+            onStatus(getString(R.string.no_scans))
+            return
+        }
+        val labels = scans.map { manifest ->
+            val record = JSONObject(manifest.readText())
+            "${record.getString("scan_id")} · ${record.getString("state")}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.review_scans)
+            .setItems(labels.toTypedArray()) { _, index -> startActivity(ReviewActivity.intent(this, scans[index])) }
+            .show()
+    }
 }

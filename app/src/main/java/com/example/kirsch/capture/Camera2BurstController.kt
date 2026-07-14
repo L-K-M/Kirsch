@@ -49,6 +49,7 @@ class Camera2BurstController(
         val captureSize: Size,
         val imageFormat: Int,
         val minFrameDurationNs: Long,
+        val maxFrameDurationNs: Long,
         val stallDurationNs: Long,
         val capabilities: Set<Int>,
     ) {
@@ -90,10 +91,10 @@ class Camera2BurstController(
     )
 
     private companion object {
-        const val BURST_FRAME_COUNT = 5
         const val LOCK_TIMEOUT_MS = 2_000L
-        const val BURST_TIMEOUT_MS = 15_000L
+        const val BURST_TIMEOUT_MS = 30_000L
         const val MAX_YUV_PIXELS = 12_000_000L
+        const val MAX_RAW_PIXELS = 16_000_000L
     }
 
     private val cameraManager = context.getSystemService(CameraManager::class.java)
@@ -106,6 +107,7 @@ class Camera2BurstController(
 
     private var generation = 0L
     private var requestedMode = CaptureMode.RAW
+    private var requestedProfile = CaptureProfile.QUALITY_RAW
     private var config: CameraConfig? = null
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
@@ -124,9 +126,14 @@ class Camera2BurstController(
     private var shutdownPending = false
 
     fun start(mode: CaptureMode) {
+        start(if (mode == CaptureMode.RAW) CaptureProfile.QUALITY_RAW else CaptureProfile.QUALITY_YUV)
+    }
+
+    fun start(profile: CaptureProfile) {
         cameraHandler.post {
             if (closed) return@post
-            requestedMode = mode
+            requestedProfile = profile
+            requestedMode = profile.preferredMode
             generation += 1
             closeCameraResources(markActiveCaptureFailed = true)
             openCamera(generation)
@@ -157,9 +164,10 @@ class Camera2BurstController(
                     captureId,
                     normalizedPrintId,
                     currentConfig.mode,
-                    BURST_FRAME_COUNT,
+                    requestedProfile.frameCount,
                     currentConfig.characteristics,
                     cameraJson(currentConfig),
+                    requestedProfile,
                 )
             } catch (error: Exception) {
                 status("Unable to create capture package: ${error.message}")
@@ -173,6 +181,11 @@ class Camera2BurstController(
             if (requestedMode != currentConfig.mode) {
                 writer.addWarning(
                     "Requested ${requestedMode.manifestValue}; fell back to ${currentConfig.mode.manifestValue}",
+                )
+            }
+            if (requestedProfile.frameIntervalNs > 0 && !currentConfig.supportsManualSensor) {
+                writer.addWarning(
+                    "Requested sweep pacing is advisory because this camera cannot set SENSOR_FRAME_DURATION; actual timestamps are authoritative",
                 )
             }
             lockPlan = LockPlan(
@@ -227,7 +240,7 @@ class Camera2BurstController(
                 selected.captureSize.width,
                 selected.captureSize.height,
                 selected.imageFormat,
-                BURST_FRAME_COUNT + 2,
+                requestedProfile.frameCount + 2,
             )
             reader.setOnImageAvailableListener({ source -> drainImages(source, openGeneration) }, imageHandler)
             imageReader = reader
@@ -313,6 +326,8 @@ class Camera2BurstController(
             captureSize = captureSize,
             imageFormat = format,
             minFrameDurationNs = map.getOutputMinFrameDuration(format, captureSize),
+            maxFrameDurationNs = characteristics.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION)
+                ?: Long.MAX_VALUE,
             stallDurationNs = map.getOutputStallDuration(format, captureSize),
             capabilities = capabilities,
         )
@@ -320,8 +335,8 @@ class Camera2BurstController(
 
     private fun chooseCaptureSize(sizes: List<Size>, mode: CaptureMode): Size {
         val ranked = sizes.sortedByDescending(::area)
-        if (mode == CaptureMode.RAW) return ranked.first()
-        return ranked.firstOrNull { area(it) <= MAX_YUV_PIXELS } ?: ranked.last()
+        val pixelLimit = if (mode == CaptureMode.RAW) MAX_RAW_PIXELS else MAX_YUV_PIXELS
+        return ranked.firstOrNull { area(it) <= pixelLimit } ?: ranked.last()
     }
 
     private fun choosePreviewSize(sizes: List<Size>, captureSize: Size): Size {
@@ -543,11 +558,17 @@ class Camera2BurstController(
             activeWriter?.captureId == plan.captureId
 
     private fun threeAReady(result: TotalCaptureResult, selected: CameraConfig): Boolean {
+        val manualSensorWillBeUsed = selected.supportsManualSensor &&
+            result.get(CaptureResult.SENSOR_EXPOSURE_TIME) != null &&
+            result.get(CaptureResult.SENSOR_SENSITIVITY) != null
         return ThreeAStatePolicy.locked(
             result.get(CaptureResult.CONTROL_AE_STATE),
             result.get(CaptureResult.CONTROL_AWB_STATE),
             result.get(CaptureResult.CONTROL_AF_STATE),
-            selected.aeLockAvailable,
+            ThreeAStatePolicy.aeLockRequired(
+                selected.aeLockAvailable,
+                manualSensorWillBeUsed,
+            ),
             selected.awbLockAvailable,
             selected.autoFocusLockAvailable,
         )
@@ -567,20 +588,20 @@ class Camera2BurstController(
         }
         plan.warnings.forEach(writer::addWarning)
         activePairer = TimestampPairer(
-            maxPendingImages = BURST_FRAME_COUNT + 1,
+            maxPendingImages = requestedProfile.frameCount + 1,
             onPair = { image, result -> dispatchFrameWrite(writer, image, result) },
             onDropImage = Image::close,
         )
         try {
             session.stopRepeating()
-            val requests = (0 until BURST_FRAME_COUNT).map { frameIndex ->
+            val requests = (0 until requestedProfile.frameCount).map { frameIndex ->
                 camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
                     applyLockedValues(this, selected, lockedResult)
                     setTag(BurstFrameTag(plan.generation, plan.captureId, frameIndex))
                 }.build()
             }
-            status("Capturing ${selected.mode.displayName} burst")
+            status("Capturing ${requestedProfile.displayName} (${requestedProfile.frameCount} frames)")
             session.captureBurstRequests(requests, cameraExecutor, createBurstCallback(plan, writer))
             cameraHandler.postDelayed({
                 if (activeWriter === writer) {
@@ -610,7 +631,12 @@ class Camera2BurstController(
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, sensitivity)
             builder.set(
                 CaptureRequest.SENSOR_FRAME_DURATION,
-                maxOf(frameDuration ?: 0L, exposure, selected.minFrameDurationNs),
+                maxOf(
+                    frameDuration ?: 0L,
+                    exposure,
+                    selected.minFrameDurationNs,
+                    requestedProfile.frameIntervalNs,
+                ).coerceAtMost(selected.maxFrameDurationNs),
             )
         } else {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
@@ -766,7 +792,7 @@ class Camera2BurstController(
                 activeWrites -= 1
                 if (!success) finishSuccess = false
                 if (activeWrites == 0) closeRetiredReaders()
-                if (count == BURST_FRAME_COUNT) requestFinish(success = finishSuccess)
+                if (count == requestedProfile.frameCount) requestFinish(success = finishSuccess)
                 else if (finishRequested && activeWrites == 0) finalizeActiveWriter()
             }
         }
@@ -895,7 +921,8 @@ class Camera2BurstController(
         append("manualSensor=${selected.supportsManualSensor} ")
         append("manualPost=${selected.supportsManualPostProcessing} ")
         append("burst=${selected.supportsBurst} ")
-        append("stall=${selected.stallDurationNs}ns minFrame=${selected.minFrameDurationNs}ns")
+        append("stall=${selected.stallDurationNs}ns minFrame=${selected.minFrameDurationNs}ns ")
+        append("maxFrame=${selected.maxFrameDurationNs}ns")
     }
 
     private fun cameraJson(selected: CameraConfig) = CaptureMetadata.characteristicsJson(
@@ -907,6 +934,13 @@ class Camera2BurstController(
         selected.minFrameDurationNs,
         selected.stallDurationNs,
     ).put("requested_capture_mode", requestedMode.manifestValue)
+        .put("capture_profile", requestedProfile.manifestValue)
+        .put("requested_frame_count", requestedProfile.frameCount)
+        .put("requested_frame_interval_ns", requestedProfile.frameIntervalNs)
+        .put(
+            "effective_frame_interval_ns",
+            requestedProfile.frameIntervalNs.coerceAtMost(selected.maxFrameDurationNs),
+        )
         .put("burst_capability", selected.supportsBurst)
         .put("manual_sensor_capability", selected.supportsManualSensor)
         .put("manual_post_processing_capability", selected.supportsManualPostProcessing)

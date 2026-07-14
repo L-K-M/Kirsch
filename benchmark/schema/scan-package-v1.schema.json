@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirsch.invalid/schema/scan-package-v1.schema.json",
+  "title": "Kirsch product scan and derivative graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scan_id",
+    "state",
+    "acquisition_manifest"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "scan_id": { "$ref": "#/$defs/id" },
+    "created_utc": { "type": "string", "format": "date-time" },
+    "accepted_utc": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["processing", "review", "accepted", "failed"] },
+    "processing_attempt": { "type": "integer", "minimum": 1 },
+    "acquisition_manifest": { "type": "string", "minLength": 1 },
+    "acquisition_sha256": { "$ref": "#/$defs/sha256" },
+    "error": { "type": "string", "minLength": 1 },
+    "source_retained": { "type": "boolean" },
+    "used_fusion": { "type": "boolean" },
+    "preview_path": { "$ref": "#/$defs/path" },
+    "working_image_path": { "$ref": "#/$defs/path" },
+    "processing_report": { "$ref": "#/$defs/path" },
+    "selected_quad": { "$ref": "#/$defs/quad" },
+    "manual_quad": { "$ref": "#/$defs/quad" },
+    "archival_scale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recorded_utc",
+        "authority",
+        "physical_width_mm",
+        "physical_height_mm",
+        "pixel_width",
+        "pixel_height",
+        "sampling_frequency_ppi_x",
+        "sampling_frequency_ppi_y",
+        "claim",
+        "delivered_resolution_claimed"
+      ],
+      "properties": {
+        "recorded_utc": { "type": "string", "format": "date-time" },
+        "authority": { "enum": ["confirmed-dimensions", "coplanar-target"] },
+        "target_id": { "type": "string", "minLength": 1 },
+        "physical_width_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "physical_height_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "pixel_width": { "type": "integer", "minimum": 1 },
+        "pixel_height": { "type": "integer", "minimum": 1 },
+        "sampling_frequency_ppi_x": { "type": "number", "exclusiveMinimum": 0 },
+        "sampling_frequency_ppi_y": { "type": "number", "exclusiveMinimum": 0 },
+        "claim": { "const": "sampling-frequency-from-confirmed-physical-scale" },
+        "delivered_resolution_claimed": { "const": false }
+      }
+    },
+    "derivatives": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/derivative" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "quad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalized_points"],
+      "properties": {
+        "area_pixels": { "type": "number", "minimum": 0 },
+        "normalized_points": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "number", "minimum": 0, "maximum": 1 }
+            ]
+          }
+        }
+      }
+    },
+    "derivative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "bytes", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "kind": {
+          "enum": ["acquisition-master", "acquisition-derived", "confidence-map", "failure-map", "restored", "generative"]
+        },
+        "media_type": { "type": "string", "minLength": 1 },
+        "recipe": { "type": "string", "minLength": 1 },
+        "created_utc": { "type": "string", "format": "date-time" },
+        "parent_path": { "$ref": "#/$defs/path" },
+        "parent_sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

@@ -1,55 +1,76 @@
-# Camera2 Burst Prototype
+# Kirsch Android App
 
-This app is an evidence-gathering tool, not the Phase 1 scanner UI. It opens a rear camera through direct Camera2, configures preview plus one capture stream, locks the available 3A controls, submits five non-interleaved requests, and saves timestamp-matched results.
+Kirsch captures an immutable Camera2 acquisition package, processes accepted YUV packages locally, and records every output in a scan-level derivative graph. It does not upload data and the base manifest has no network permission.
 
-## Outputs
+## Capture Profiles
 
-App-private external storage contains:
+- **Quality YUV sweep** is the default product path. It records nine full-resolution frames over a requested one-second sweep on manual-sensor devices. On automatic-only devices the request interval is advisory and actual timestamps remain authoritative.
+- **RAW acquisition only** records a nine-frame DNG package when supported and falls back to YUV otherwise. RAW packages are retained but are not converted into product derivatives because Phase 0 did not verify a DNG demosaic, black-level, or color pipeline.
+- **Quick single frame** records one YUV frame and uses the same review/export path without claiming glare reduction.
+
+The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope.
+
+## Processing
+
+Accepted YUV acquisitions enter a process-death-recoverable single-worker queue. Processing:
+
+1. verifies every selected payload and metadata file against its recorded byte count and SHA-256
+2. selects five evenly spaced frames from the nine-frame acquisition to bound native memory
+3. normalizes by exposure-time × sensitivity where metadata permits
+4. registers frames to the middle observation with ORB and MAGSAC++ homographies
+5. rejects weak registration and falls back visibly to the best single frame
+6. applies conservative glare-aware temporal selection and emits confidence/failure maps
+7. detects print quadrilaterals, rectifies the largest candidate, and always permits manual correction
+8. writes a high-quality JPEG and a 16-bit TIFF container
+
+The TIFF records its source bit depth separately. An 8-bit YUV acquisition stored in a 16-bit container is not represented as a 16-bit capture.
+
+## Review And Derivatives
+
+The review screen provides draggable print corners, acceptance, archival physical-scale metadata, and explicit restored derivatives:
+
+- descreening
+- dust/scratch removal
+- fade correction
+- classical 2× upscaling
+
+Restorations never overwrite the acquisition-derived master. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
+
+Sampling frequency is labeled PPI only after confirmed dimensions or a traceable coplanar target are recorded. This does not claim delivered SFR resolution.
+
+## Unavailable Capabilities
+
+The capabilities screen gives recorded reasons for unavailable MFSR, learned residual models, curl correction, album splitting, handwriting recognition, learned illuminant estimation, generative restoration, C2PA, and cloud processing. These paths fail closed; the app does not fabricate placeholder results.
+
+## Storage And Export
 
 ```text
-Android/data/com.example.kirsch/files/captures/
-  capture-<UTC>-<suffix>/
-    capture.json
-    camera-characteristics.json
-    frames/
-      frame-00.dng              # RAW mode
-      frame-00.i420             # YUV mode, canonical Y/U/V planar bytes
-      frame-00.json             # CaptureResult and delivery metadata
+Android/data/com.example.kirsch/files/
+  captures/capture-.../           # immutable acquisition package
+  scans/product/capture-.../
+    scan.json                     # state and derivative graph
+    processing-report.json
+    working/fused.png
+    derivatives/
+      acquisition-master.jpg
+      acquisition-master.tif
+      confidence.png
+      failure.png
+      restored-*.jpg
 ```
 
-`capture.json` follows `benchmark/schema/capture-package-v0.1.schema.json`. Copy a package from the device and run:
+Storage Access Framework export places paired sources under `acquisitions/` and products under `scans/`. In-progress and `.partial` files are excluded.
+
+## Build
 
 ```bash
-python3 benchmark/tools/kirsch_benchmark.py validate-capture /path/to/capture.json
+./gradlew testDebugUnitTest assembleDebug lintDebug
 ```
 
-YUV output is lossless relative to the delivered 8-bit `YUV_420_888` samples. It is not sensor RAW. The sidecar records source row/pixel strides and crop geometry; the `.i420` payload itself is tightly packed Y, then U, then V.
+OpenCV 4.10.0 is the only new runtime artifact and is recorded in `benchmark/ARTIFACTS.csv`.
 
-The manifest reports `received_frame_count` when an image/result pair reaches the writer and `persisted_frame_count` only after payload and sidecar writes succeed. Accepted packages require both counts, the frame list, and the requested count to match with no errors.
+Exported scan graphs can be checked without OpenCV:
 
-## Hardware Procedure
-
-1. Install the debug APK and grant camera permission.
-2. Enter the assigned benchmark print ID.
-3. Select RAW or YUV. RAW automatically falls back to YUV if the chosen rear camera lacks `RAW_SENSOR`.
-4. Wait for preview metadata, then capture one burst.
-5. Keep the app foregrounded until all five files are written.
-6. Copy the package, validate it, and record the package as a benchmark acquisition.
-
-The status panel reports the selected camera, hardware level, RAW/manual/burst capabilities, sizes, output stall/min-frame duration, 3A-lock degradation, and output directory.
-
-## Known Phase-0 Limits
-
-- Stream combinations and timestamp behavior still require real-device qualification.
-- The prototype uses preview plus one capture reader; RAW and YUV require session reconfiguration.
-- ARCore coexistence, CameraX sequential RAW fallback, energy instrumentation, and thermal-soak orchestration are not implemented yet.
-- App-private external storage is intentional. There is no background upload or cloud path.
-- A process death during a burst can leave a partial directory without `capture.json`; ingestion must reject it.
-
-## Exporting packages
-
-`Android/data` app-private storage is not browsable on many devices. The
-EXPORT CAPTURE PACKAGES button zips one package (or all of them) and
-writes the archive to any Storage Access Framework destination — Downloads,
-a cloud-drive app, or a USB drive — so packages can be qualified from
-secondary devices without adb.
+```bash
+python3 benchmark/tools/kirsch_benchmark.py validate-scan /path/to/scan.json
+```

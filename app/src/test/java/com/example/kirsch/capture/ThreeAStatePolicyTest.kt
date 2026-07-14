@@ -51,4 +51,24 @@ class ThreeAStatePolicyTest {
             ),
         )
     }
+
+    @Test
+    fun manualSensorPathDoesNotWaitForImpossibleAeLockedState() {
+        assertFalse(
+            ThreeAStatePolicy.aeLockRequired(
+                aeLockAvailable = true,
+                manualSensorWillBeUsed = true,
+            ),
+        )
+        assertTrue(
+            ThreeAStatePolicy.locked(
+                CaptureResult.CONTROL_AE_STATE_INACTIVE,
+                CaptureResult.CONTROL_AWB_STATE_LOCKED,
+                CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+                aeLockRequired = false,
+                awbLockRequired = true,
+                focusLockRequired = true,
+            ),
+        )
+    }
 }
