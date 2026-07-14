@@ -86,6 +86,20 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     override fun onResume() {
         super.onResume()
         resumed = true
+        // A scan that finished while this screen was paused (Settings open,
+        // app backgrounded) still deserves its automatic review hand-off.
+        val pendingScanId = pendingReviewScanId
+        if (pendingScanId != null) {
+            val manifest = File(File(ScanProcessor(this).scanRoot(), pendingScanId), "scan.json")
+            val ready = manifest.isFile && runCatching {
+                JSONObject(manifest.readText()).optString("state") in setOf("review", "accepted")
+            }.getOrDefault(false)
+            if (ready) {
+                pendingReviewScanId = null
+                startActivity(ReviewActivity.intent(this, manifest))
+                return
+            }
+        }
         startCameraIfReady()
         ScanQueue.resumePending(this, this)
     }
@@ -121,6 +135,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             ?.takeIf(String::isNotBlank)
             ?: getString(R.string.unassigned_print_id)
         pendingReviewScanId = null
+        statusChip.visibility = View.GONE
         controller.capture(printId)
     }
 

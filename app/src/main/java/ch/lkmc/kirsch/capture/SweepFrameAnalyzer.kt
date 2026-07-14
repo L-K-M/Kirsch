@@ -39,32 +39,41 @@ class SweepFrameAnalyzer(val analysisWidth: Int = 256) {
                 bytes[row * width + column] = buffer.get(rowOffset + column * columnStep)
             }
         }
+        // The caller survives analysis exceptions and keeps sweeping, so
+        // every native Mat must be released even on a throwing OpenCV call.
         val gray = Mat(height, width, CvType.CV_8UC1)
-        gray.put(0, 0, bytes)
         val laplacian = Mat()
-        Imgproc.Laplacian(gray, laplacian, CvType.CV_32F)
         val mean = MatOfDouble()
         val deviation = MatOfDouble()
-        Core.meanStdDev(laplacian, mean, deviation)
-        val sharpness = deviation.toArray()[0].let { it * it }
-        laplacian.release()
-        mean.release()
-        deviation.release()
-        val current = Mat()
-        gray.convertTo(current, CvType.CV_32FC1)
-        gray.release()
-        val previousFrame = previous
-        val shift = if (previousFrame != null &&
-            previousFrame.rows() == current.rows() &&
-            previousFrame.cols() == current.cols()
-        ) {
-            Imgproc.phaseCorrelate(previousFrame, current)
-        } else {
-            org.opencv.core.Point(0.0, 0.0)
+        var current: Mat? = null
+        try {
+            gray.put(0, 0, bytes)
+            Imgproc.Laplacian(gray, laplacian, CvType.CV_32F)
+            Core.meanStdDev(laplacian, mean, deviation)
+            val sharpness = deviation.toArray()[0].let { it * it }
+            val next = Mat()
+            current = next
+            gray.convertTo(next, CvType.CV_32FC1)
+            val previousFrame = previous
+            val shift = if (previousFrame != null &&
+                previousFrame.rows() == next.rows() &&
+                previousFrame.cols() == next.cols()
+            ) {
+                Imgproc.phaseCorrelate(previousFrame, next)
+            } else {
+                org.opencv.core.Point(0.0, 0.0)
+            }
+            previousFrame?.release()
+            previous = next
+            current = null
+            return Measurement(shift.x, shift.y, sharpness)
+        } finally {
+            gray.release()
+            laplacian.release()
+            mean.release()
+            deviation.release()
+            current?.release()
         }
-        previousFrame?.release()
-        previous = current
-        return Measurement(shift.x, shift.y, sharpness)
     }
 
     fun release() {

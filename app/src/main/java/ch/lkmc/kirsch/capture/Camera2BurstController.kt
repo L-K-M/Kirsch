@@ -114,6 +114,7 @@ class Camera2BurstController(
         // Sweep frames are analyzed and mostly closed immediately, so the
         // reader needs far fewer full-resolution buffers than a fixed burst.
         const val SWEEP_READER_IMAGES = 6
+        const val SWEEP_FINALIZE_RECHECK_MS = 5_000L
     }
 
     private val cameraManager = context.getSystemService(CameraManager::class.java)
@@ -691,15 +692,34 @@ class Camera2BurstController(
             status("Sweep started")
             listener.onSweepProgress(0f, 0)
             session.setSingleRepeatingRequest(request, cameraExecutor, createSweepCallback(plan, writer, sweep))
-            cameraHandler.postDelayed({
-                // Fires for a sweep that never completed AND for a completed
-                // sweep whose final write or result never landed.
-                if (activeWriter === writer && sweepSession === sweep) {
-                    sweep.stopped = true
-                    writer.addError("Sweep timeout before completion")
-                    requestFinish(success = false)
-                }
-            }, BURST_TIMEOUT_MS)
+            cameraHandler.postDelayed(
+                object : Runnable {
+                    override fun run() {
+                        if (activeWriter !== writer || sweepSession !== sweep) return
+                        if (!sweep.stopped) {
+                            // The sweep never reached a completion decision.
+                            sweep.stopped = true
+                            writer.addError("Sweep timeout before completion")
+                            requestFinish(success = false)
+                            return
+                        }
+                        // Completed sweep still finalizing. In-flight writes
+                        // finish on their own — keep waiting. But once no
+                        // write is active and frames are still missing, the
+                        // repeating session is stopped and the missing
+                        // result can never arrive: fail rather than hang.
+                        if (activeWrites > 0) {
+                            cameraHandler.postDelayed(this, SWEEP_FINALIZE_RECHECK_MS)
+                            return
+                        }
+                        if (sweepTargetCount < 0 || writer.persistedFrameCount() < sweepTargetCount) {
+                            writer.addError("Sweep frames never finished persisting")
+                            requestFinish(success = false)
+                        }
+                    }
+                },
+                BURST_TIMEOUT_MS,
+            )
         } catch (error: Exception) {
             sweepSession = null
             imageHandler.post { analyzer.release() }
