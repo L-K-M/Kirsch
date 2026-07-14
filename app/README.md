@@ -45,7 +45,7 @@ The capabilities screen gives recorded reasons for unavailable MFSR, learned res
 ## Storage And Export
 
 ```text
-Android/data/com.example.kirsch/files/
+Android/data/ch.lkmc.kirsch/files/
   captures/capture-.../           # immutable acquisition package
   scans/product/capture-.../
     scan.json                     # state and derivative graph
@@ -65,6 +65,13 @@ Storage Access Framework export places paired sources under `acquisitions/` and 
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug lintDebug
+```
+
+To build and install the debug APK on a phone connected over adb in one step:
+
+```bash
+scripts/install-debug.sh              # single connected device
+scripts/install-debug.sh <serial>     # pick one of several (see `adb devices`)
 ```
 
 OpenCV 4.10.0 is the only new runtime artifact and is recorded in `benchmark/ARTIFACTS.csv`.

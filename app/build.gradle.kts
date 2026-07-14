@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.kirsch"
+    namespace = "ch.lkmc.kirsch"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.kirsch"
+        applicationId = "ch.lkmc.kirsch"
         minSdk = 31
         targetSdk = 35
         versionCode = 1
