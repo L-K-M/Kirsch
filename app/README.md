@@ -4,13 +4,13 @@ Kirsch captures an immutable Camera2 acquisition package, processes accepted YUV
 
 ## Scanning Flow
 
-The main screen is a full-screen scanner: frame the photo, tap the shutter, then move the phone slowly across the print while a progress ring fills — the same interaction as fingerprint enrollment. Capture ends when enough view displacement has been gathered, the scan processes in the background, and the review screen opens automatically. Debug and benchmark controls live under Settings.
+The main screen is a full-screen scanner: frame the photo, tap the shutter, then move the phone in slow circles while a four-segment coverage ring fills — the same interaction as fingerprint enrollment. Each ring segment (right, down, left, up) fills only when the accumulated motion reaches that direction's displacement target, so a one-directional wiggle cannot finish the sweep. Capture ends when all four directions are covered, the scan processes in the background, and the review screen opens automatically. Debug and benchmark controls live under Settings.
 
-The progress ring is driven only by measured camera motion (subsampled phase correlation between consecutive frames); the guidance text is fixed and nothing in the capture flow reacts to glare or image content beyond a focus/stability gate. That constraint is deliberate — see the patent dispositions in `PLAN.md`.
+The ring is driven only by measured camera motion (subsampled phase correlation between consecutive frames); the guidance text is fixed, no visual target is placed at print corners or any other image position, and nothing in the capture flow reacts to glare or image content beyond a focus/stability gate. Those constraints are deliberate — see the patent dispositions in `PLAN.md`.
 
 ## Capture Profiles
 
-- **Glare-removal sweep** is the default product path. `SweepPolicy` keeps frames spaced by measured displacement and completes only once the kept views span a set fraction of the frame (at least five frames, at most twelve, with a hard time limit). This replaces the fixed nine-frame burst: the 2026-07-14 GRL-AL10 audit showed pacing requests are advisory on non-manual-sensor devices, where nine requests span ~320ms and a few dozen pixels — far less than a typical specular footprint. Displacement gating enforces the geometry on every device class.
+- **Glare-removal sweep** is the default product path. `SweepPolicy` keeps frames that extend directional coverage and completes only once the kept views reach a displacement target in all four directions around the start (at least five frames, at most eighteen, with a hard time limit). This replaces the fixed nine-frame burst: the 2026-07-14 GRL-AL10 audit showed pacing requests are advisory on non-manual-sensor devices, where nine requests span ~320ms and a few dozen pixels — far less than a typical specular footprint — and the first field sweeps showed that a single span target is satisfiable by one-directional motion. Directional coverage enforces perspective diversity on every device class.
 - **Fixed 9-frame burst** remains available in Settings as the benchmark comparator.
 - **RAW acquisition only** records a nine-frame DNG package when supported and falls back to YUV otherwise. RAW packages are retained but are not converted into product derivatives because Phase 0 did not verify a DNG demosaic, black-level, or color pipeline.
 - **Quick single frame** records one YUV frame and uses the same review/export path without claiming glare reduction.
@@ -34,7 +34,7 @@ The TIFF records its source bit depth separately. An 8-bit YUV acquisition store
 
 ## Review And Derivatives
 
-The review screen provides draggable print corners, acceptance, archival physical-scale metadata, and explicit restored derivatives:
+The review screen provides draggable print corners (with a magnifier loupe while dragging, and a grab radius so stray taps cannot move a corner), optional archival physical-scale metadata, and explicit restored derivatives:
 
 - descreening
 - dust/scratch removal
@@ -42,6 +42,8 @@ The review screen provides draggable print corners, acceptance, archival physica
 - classical 2× upscaling
 
 Restorations never overwrite the acquisition-derived master. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
+
+**Save to Photos** finishes a scan: the current output JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore (no extra permission required for app-created media), the scan is accepted and locked, and the export is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
 
 Sampling frequency is labeled PPI only after confirmed dimensions or a traceable coplanar target are recorded. This does not claim delivered SFR resolution.
 

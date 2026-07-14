@@ -20,6 +20,7 @@
     "acquisition_manifest": { "type": "string", "minLength": 1 },
     "acquisition_sha256": { "$ref": "#/$defs/sha256" },
     "error": { "type": "string", "minLength": 1 },
+    "extensions": { "type": "object" },
     "source_retained": { "type": "boolean" },
     "used_fusion": { "type": "boolean" },
     "preview_path": { "$ref": "#/$defs/path" },

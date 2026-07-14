@@ -2,17 +2,19 @@ package ch.lkmc.kirsch
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
-import android.view.Gravity
-import android.view.ViewGroup
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ArrayAdapter
 import android.widget.EditText
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -20,10 +22,10 @@ import android.widget.Spinner
 import ch.lkmc.kirsch.archival.ArchivalMetadataStore
 import ch.lkmc.kirsch.archival.ScaleAuthority
 import ch.lkmc.kirsch.derivative.DerivativeStore
-import ch.lkmc.kirsch.derivative.FeatureAvailability
-import ch.lkmc.kirsch.derivative.FeatureCatalog
 import ch.lkmc.kirsch.derivative.RestorationRecipe
+import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
+import java.time.Instant
 import org.json.JSONObject
 import org.opencv.core.Point
 
@@ -59,11 +61,19 @@ class ReviewActivity : Activity() {
                 Point(point.getDouble(0), point.getDouble(1))
             },
         )
-        status.text = getString(
-            R.string.review_status,
-            if (manifest.optBoolean("used_fusion")) "fused" else "single-frame fallback",
-            manifest.optString("state"),
-        )
+        val accepted = manifest.optString("state") == "accepted"
+        status.text = if (accepted) {
+            getString(R.string.scan_accepted)
+        } else {
+            getString(
+                R.string.review_status,
+                if (manifest.optBoolean("used_fusion")) {
+                    getString(R.string.review_output_fused)
+                } else {
+                    getString(R.string.review_output_single)
+                },
+            )
+        }
         val editable = manifest.optString("state") == "review"
         cornerEditor.isEnabled = editable
         editingControls.forEach { it.isEnabled = editable }
@@ -72,78 +82,97 @@ class ReviewActivity : Activity() {
     private fun buildUi() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(24))
-            setBackgroundColor(0xff151412.toInt())
+            setPadding(dp(20), dp(16), dp(20), dp(28))
         }
-        content.addView(TextView(this).apply {
-            setText(R.string.review_title)
-            setTextColor(0xfff3ede2.toInt())
-            textSize = 22f
-        })
-        content.addView(TextView(this).apply {
-            setText(R.string.corner_editor_help)
-            setTextColor(0xffd7cfc3.toInt())
-            textSize = 14f
-        })
-        cornerEditor = CornerEditorView(this)
-        content.addView(cornerEditor, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        content.addView(Button(this).apply {
-            setText(R.string.apply_manual_corners)
-            contentDescription = getString(R.string.apply_manual_corners)
-            setOnClickListener { runTask(getString(R.string.applying_manual_corners)) {
-                DerivativeStore.createManualRectification(manifestFile, cornerEditor.normalizedPoints()).file
-            } }
-            editingControls += this
-        })
-        val recipeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        RestorationRecipe.entries.forEach { recipe ->
-            recipeRow.addView(Button(this).apply {
-                text = recipe.label
-                contentDescription = getString(R.string.create_restored_derivative, recipe.label)
-                setOnClickListener { runTask(getString(R.string.processing_recipe, recipe.label)) {
-                    DerivativeStore.createRestoration(manifestFile, recipe).file
-                } }
-                editingControls += this
-            })
-        }
-        content.addView(HorizontalScrollView(this).apply { addView(recipeRow) })
-        val actionRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
-        }
-        actionRow.addView(Button(this).apply {
-            setText(R.string.accept_scan)
-            setOnClickListener {
-                val result = runCatching { DerivativeStore.accept(manifestFile) }
-                status.text = result.fold(
-                    onSuccess = {
-                        loadScan()
-                        getString(R.string.scan_accepted)
-                    },
-                    onFailure = { getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName) },
-                )
-                status.announceForAccessibility(status.text)
-            }
-            editingControls += this
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actionRow.addView(Button(this).apply {
-            setText(R.string.feature_status)
-            setOnClickListener { showFeatureStatus() }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actionRow.addView(Button(this).apply {
-            setText(R.string.archival_scale)
-            setOnClickListener { showArchivalScaleDialog() }
-            editingControls += this
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        content.addView(actionRow)
+        content.addView(
+            TextView(this).apply {
+                setText(R.string.review_title)
+                setTextColor(0xFFF3EDE2.toInt())
+                textSize = 22f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            },
+        )
         status = TextView(this).apply {
-            setTextColor(0xffd7cfc3.toInt())
-            textSize = 14f
-            setPadding(0, dp(8), 0, 0)
+            setTextColor(0xFFD7CFC3.toInt())
+            textSize = 13f
+            setPadding(0, dp(6), 0, 0)
             accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         content.addView(status)
-        setContentView(ScrollView(this).apply { addView(content) })
+
+        content.addView(sectionHeader(R.string.review_corners_section))
+        content.addView(caption(R.string.corner_editor_help))
+        cornerEditor = CornerEditorView(this)
+        content.addView(
+            cornerEditor,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        content.addView(
+            Button(this).apply {
+                setText(R.string.apply_manual_corners)
+                contentDescription = getString(R.string.apply_manual_corners)
+                setOnClickListener {
+                    runTask(getString(R.string.applying_manual_corners)) {
+                        DerivativeStore.createManualRectification(manifestFile, cornerEditor.normalizedPoints()).file
+                    }
+                }
+                editingControls += this
+            },
+        )
+        content.addView(caption(R.string.review_corners_caption))
+
+        content.addView(sectionHeader(R.string.review_enhance_section))
+        content.addView(caption(R.string.review_enhance_caption))
+        RestorationRecipe.entries.chunked(2).forEach { pair ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            pair.forEach { recipe ->
+                row.addView(
+                    Button(this).apply {
+                        text = recipe.label
+                        contentDescription = getString(R.string.create_restored_derivative, recipe.label)
+                        setOnClickListener {
+                            runTask(getString(R.string.processing_recipe, recipe.label)) {
+                                DerivativeStore.createRestoration(manifestFile, recipe).file
+                            }
+                        }
+                        editingControls += this
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+            }
+            content.addView(row)
+        }
+
+        content.addView(sectionHeader(R.string.review_finish_section))
+        content.addView(
+            Button(this).apply {
+                setText(R.string.accept_scan)
+                setOnClickListener { saveScan() }
+                editingControls += this
+            },
+        )
+        content.addView(caption(R.string.review_save_caption))
+        content.addView(
+            Button(this).apply {
+                setText(R.string.archival_scale)
+                setOnClickListener { showArchivalScaleDialog() }
+                editingControls += this
+            },
+        )
+        content.addView(caption(R.string.review_scale_caption))
+
+        setContentView(
+            ScrollView(this).apply {
+                setBackgroundColor(0xFF0E0D0B.toInt())
+                addView(
+                    content,
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            },
+        )
     }
 
     private fun runTask(message: String, operation: () -> File) {
@@ -153,28 +182,88 @@ class ReviewActivity : Activity() {
         Thread({
             val result = runCatching(operation)
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
                     onSuccess = {
                         loadScan()
                         status.text = getString(R.string.derivative_created, it.name)
                     },
-                    onFailure = { status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName) },
+                    onFailure = {
+                        loadScan()
+                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                    },
                 )
-                if (result.isFailure) loadScan()
                 status.announceForAccessibility(status.text)
             }
         }, "kirsch-derivative").start()
     }
 
-    private fun showFeatureStatus() {
-        val message = FeatureCatalog.features.joinToString("\n\n") { feature ->
-            if (feature.availability == FeatureAvailability.AVAILABLE) {
-                "${feature.label}: available"
-            } else {
-                "${feature.label}: unavailable\n${feature.reason}"
+    /**
+     * Finishing a scan runs in fail-closed order: the current output JPEG
+     * goes into the device photo library first (the user-visible
+     * deliverable), then the scan is accepted (locked), then the export is
+     * recorded in the scan manifest's extensions.
+     */
+    private fun saveScan() {
+        status.text = getString(R.string.saving_scan)
+        editingControls.forEach { it.isEnabled = false }
+        cornerEditor.isEnabled = false
+        Thread({
+            val result = runCatching {
+                val (record, root) = ScanManifestStore.locked {
+                    val record = JSONObject(manifestFile.readText())
+                    require(record.getString("state") == "review") { "Only a scan in review can be saved" }
+                    record to requireNotNull(manifestFile.parentFile)
+                }
+                val galleryUri = exportToGallery(record, root)
+                DerivativeStore.accept(manifestFile)
+                ScanManifestStore.update(manifestFile) { manifest ->
+                    val extensions = manifest.optJSONObject("extensions") ?: JSONObject()
+                    extensions.put("gallery_uri", galleryUri.toString())
+                    extensions.put("gallery_saved_utc", Instant.now().toString())
+                    manifest.put("extensions", extensions)
+                }
             }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                result.fold(
+                    onSuccess = {
+                        loadScan()
+                        status.text = getString(R.string.scan_accepted)
+                    },
+                    onFailure = {
+                        loadScan()
+                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                    },
+                )
+                status.announceForAccessibility(status.text)
+            }
+        }, "kirsch-save").start()
+    }
+
+    private fun exportToGallery(record: JSONObject, root: File): Uri {
+        val preview = File(root, record.getString("preview_path"))
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "${record.getString("scan_id")}.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Kirsch")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        AlertDialog.Builder(this).setTitle(R.string.feature_status).setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = contentResolver.insert(collection, values)
+            ?: error("The photo library rejected the scan")
+        try {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                preview.inputStream().use { input -> input.copyTo(output) }
+            } ?: error("Could not write to the photo library")
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (error: Throwable) {
+            contentResolver.delete(uri, null, null)
+            throw error
+        }
+        return uri
     }
 
     private fun showArchivalScaleDialog() {
@@ -225,6 +314,22 @@ class ReviewActivity : Activity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun sectionHeader(resId: Int): TextView = TextView(this).apply {
+        setText(resId)
+        setTextColor(0xFFFFB84D.toInt())
+        textSize = 13f
+        letterSpacing = 0.1f
+        setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(24), 0, dp(6))
+    }
+
+    private fun caption(resId: Int): TextView = TextView(this).apply {
+        setText(resId)
+        setTextColor(0xFF8F887D.toInt())
+        textSize = 12f
+        setPadding(0, dp(4), 0, dp(4))
     }
 
     private fun sampleSize(file: File, maximumDimension: Int): Int {

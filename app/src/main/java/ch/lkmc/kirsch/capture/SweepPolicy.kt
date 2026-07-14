@@ -7,15 +7,18 @@ import kotlin.math.min
  * Frame selection and completion policy for the freehand glare-removal sweep.
  *
  * The 2026-07-14 GRL-AL10 product sweep audit showed that a fixed-count burst
- * does not enforce the geometry fusion needs: on devices that ignore pacing
- * requests, nine frames span ~320ms and a few dozen pixels, far less than a
- * typical specular footprint. This policy makes accumulated view displacement
- * the completion condition instead of a frame count.
+ * does not enforce the geometry fusion needs, and the first field sweeps
+ * showed that a single displacement span does not either: a one-directional
+ * wiggle satisfies a span target while leaving most of the print without a
+ * genuinely different perspective. Completion therefore requires directional
+ * coverage — the kept views must reach a displacement target in all four
+ * directions (right, down, left, up) around the sweep's starting point.
  *
  * Design constraint carried over from PLAN.md: progress and completion are
  * functions of camera motion only. Frames are gated on spacing and a
  * relative sharpness (stability) check — never on glare or highlight
- * content, and the user guidance never depends on what the image shows.
+ * content. The user guidance is fixed text, and no visual target is placed
+ * at print corners or any other predetermined image position.
  *
  * All coordinates are in the units of the caller's shift measurements
  * (analysis pixels); [frameWidth] must be in the same units.
@@ -25,50 +28,53 @@ class SweepPolicy(
     private val settings: Settings = Settings(),
 ) {
     data class Settings(
-        /** Kept views must span this fraction of the frame width before the sweep can complete. */
-        val targetSpanFraction: Double = 0.22,
+        /**
+         * Kept views must displace at least this fraction of the frame width
+         * in each of the four directions before the sweep can complete.
+         */
+        val directionReachFraction: Double = 0.10,
         /** A frame is kept only this far (fraction of frame width) from the last kept frame. */
-        val minKeepSpacingFraction: Double = 0.02,
+        val minKeepSpacingFraction: Double = 0.025,
         /** Fusion needs at least this many views before completion. */
         val minFrames: Int = 5,
         /** Hard cap on persisted frames per sweep. */
-        val maxFrames: Int = 12,
+        val maxFrames: Int = 18,
         /** The sweep ends with whatever was gathered after this long. */
-        val maxDurationNs: Long = 12_000_000_000L,
+        val maxDurationNs: Long = 20_000_000_000L,
         /** Frames sharper than this fraction of the recent best pass the stability gate. */
         val minSharpnessRatio: Double = 0.4,
         /** How many recent frames define the sharpness reference. */
         val sharpnessWindow: Int = 8,
     ) {
         init {
-            require(targetSpanFraction > 0 && minKeepSpacingFraction > 0)
+            require(directionReachFraction > 0 && minKeepSpacingFraction > 0)
             require(minFrames in 1..maxFrames)
             require(maxDurationNs > 0 && sharpnessWindow > 0)
             require(minSharpnessRatio in 0.0..1.0)
         }
     }
 
-    data class Decision(
+    class Decision(
         val keep: Boolean,
         val complete: Boolean,
-        /** Monotonic 0..1, driven by displacement span and kept-frame count only. */
+        /** Monotonic 0..1, driven by directional coverage and kept-frame count only. */
         val progress: Float,
+        /** Monotonic 0..1 per direction, ordered right (+x), down (+y), left (-x), up (-y). */
+        val directionProgress: FloatArray,
         val keptCount: Int,
         val timedOut: Boolean,
     )
 
-    private val targetSpan = settings.targetSpanFraction * frameWidth
+    private val directionTarget = settings.directionReachFraction * frameWidth
     private val minSpacing = settings.minKeepSpacingFraction * frameWidth
     private val recentSharpness = ArrayDeque<Double>()
 
+    // Reach of kept views along +x, +y, -x, -y relative to the first kept frame.
+    private val reach = DoubleArray(4)
     private var positionX = 0.0
     private var positionY = 0.0
     private var lastKeptX = 0.0
     private var lastKeptY = 0.0
-    private var minX = 0.0
-    private var maxX = 0.0
-    private var minY = 0.0
-    private var maxY = 0.0
     private var keptCount = 0
     private var firstTimestampNs = Long.MIN_VALUE
     private var completed = false
@@ -97,28 +103,37 @@ class SweepPolicy(
         if (!completed && keptCount < settings.maxFrames) {
             val spaced = keptCount == 0 ||
                 hypot(positionX - lastKeptX, positionY - lastKeptY) >= minSpacing
-            if (spaced && (sharpEnough || keptCount == 0)) {
+            // Redundant views are skipped so the frame budget is spent on
+            // frames that extend coverage — and a direction stops counting
+            // once it reaches its target, so no single direction can consume
+            // the budget and complete the sweep through the frame cap alone.
+            val extendsCoverage = keptCount < settings.minFrames ||
+                (positionX > reach[0] && reach[0] < directionTarget) ||
+                (positionY > reach[1] && reach[1] < directionTarget) ||
+                (-positionX > reach[2] && reach[2] < directionTarget) ||
+                (-positionY > reach[3] && reach[3] < directionTarget)
+            if (spaced && extendsCoverage && (sharpEnough || keptCount == 0)) {
                 keep = true
                 keptCount += 1
                 lastKeptX = positionX
                 lastKeptY = positionY
-                if (keptCount == 1) {
-                    minX = positionX; maxX = positionX
-                    minY = positionY; maxY = positionY
-                } else {
-                    minX = min(minX, positionX); maxX = maxOf(maxX, positionX)
-                    minY = min(minY, positionY); maxY = maxOf(maxY, positionY)
-                }
+                reach[0] = maxOf(reach[0], positionX)
+                reach[1] = maxOf(reach[1], positionY)
+                reach[2] = maxOf(reach[2], -positionX)
+                reach[3] = maxOf(reach[3], -positionY)
             }
         }
 
-        val span = hypot(maxX - minX, maxY - minY)
-        val spanFraction = min(1.0, span / targetSpan)
+        val directions = FloatArray(4) { index ->
+            min(1.0, reach[index] / directionTarget).toFloat()
+        }
+        val coverage = directions.map(Float::toDouble).average()
         val frameFraction = min(1.0, keptCount.toDouble() / settings.minFrames)
-        bestProgress = maxOf(bestProgress, min(spanFraction, frameFraction).toFloat())
+        bestProgress = maxOf(bestProgress, min(coverage, frameFraction).toFloat())
 
         if (!completed) {
-            val enough = keptCount >= settings.minFrames && span >= targetSpan
+            val covered = directions.all { it >= 1f }
+            val enough = keptCount >= settings.minFrames && covered
             val capped = keptCount >= settings.maxFrames
             val expired = keptCount >= 1 &&
                 timestampNs - firstTimestampNs >= settings.maxDurationNs
@@ -131,6 +146,7 @@ class SweepPolicy(
             keep = keep,
             complete = completed,
             progress = if (completed && !timedOut) 1f else bestProgress,
+            directionProgress = directions,
             keptCount = keptCount,
             timedOut = timedOut,
         )

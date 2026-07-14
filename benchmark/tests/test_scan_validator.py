@@ -106,6 +106,7 @@ class ScanPackageValidatorTest(unittest.TestCase):
                         "sha256": digest,
                     }
                 ],
+                "extensions": {"gallery_uri": "content://media/external_primary/images/media/1"},
             }
             path = root / "scan.json"
             path.write_text(json.dumps(manifest))

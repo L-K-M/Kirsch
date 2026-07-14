@@ -17,7 +17,7 @@ enum class CaptureProfile(
      */
     SWEEP(
         CaptureMode.YUV,
-        frameCount = 12,
+        frameCount = 18,
         frameIntervalNs = 0L,
         manifestValue = "product-sweep",
         displayName = "Glare-removal sweep",

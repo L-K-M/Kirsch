@@ -20,6 +20,7 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
+import android.util.Log
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
@@ -40,8 +41,12 @@ class Camera2BurstController(
         fun onBusyChanged(busy: Boolean)
         fun onCaptureFinished(manifestPath: String)
 
-        /** Sweep progress driven by measured camera motion only. May be called from any thread. */
-        fun onSweepProgress(progress: Float, keptFrames: Int) {}
+        /**
+         * Sweep progress driven by measured camera motion only. [directions]
+         * is per-direction coverage (right, down, left, up), 0..1 each. May
+         * be called from any thread.
+         */
+        fun onSweepProgress(progress: Float, keptFrames: Int, directions: FloatArray) {}
 
         /** Reports the active preview buffer size so the view can correct its aspect ratio. */
         fun onPreviewConfigured(width: Int, height: Int) {}
@@ -260,7 +265,9 @@ class Camera2BurstController(
         try {
             val selected = selectCamera(requestedMode)
             config = selected
-            status(describeConfig(selected))
+            // Diagnostic detail belongs in the log; the UI chip shows only
+            // product-relevant messages.
+            Log.i("Kirsch", describeConfig(selected))
             val reader = ImageReader.newInstance(
                 selected.captureSize.width,
                 selected.captureSize.height,
@@ -690,7 +697,7 @@ class Camera2BurstController(
             }.build()
             sweepSession = sweep
             status("Sweep started")
-            listener.onSweepProgress(0f, 0)
+            listener.onSweepProgress(0f, 0, FloatArray(4))
             session.setSingleRepeatingRequest(request, cameraExecutor, createSweepCallback(plan, writer, sweep))
             cameraHandler.postDelayed(
                 object : Runnable {
@@ -790,7 +797,7 @@ class Camera2BurstController(
         } else {
             image.close()
         }
-        listener.onSweepProgress(decision.progress, decision.keptCount)
+        listener.onSweepProgress(decision.progress, decision.keptCount, decision.directionProgress)
         if (decision.complete && !sweep.stopped) {
             sweep.stopped = true
             cameraHandler.post { finishSweep(sweep, decision.keptCount, decision.timedOut) }

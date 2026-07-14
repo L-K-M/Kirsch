@@ -12,6 +12,10 @@ import kotlin.math.hypot
 import org.opencv.core.Point
 
 class CornerEditorView(context: Context) : View(context) {
+    private companion object {
+        const val GRAB_RADIUS_DP = 48f
+    }
+
     private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xffffb84d.toInt()
@@ -26,6 +30,9 @@ class CornerEditorView(context: Context) : View(context) {
     private var bitmap: Bitmap? = null
     private val destination = RectF()
     private var activeCorner = -1
+    private var grabOffsetX = 0f
+    private var grabOffsetY = 0f
+    private var magnifier: android.widget.Magnifier? = null
     private var points = mutableListOf(
         Point(0.04, 0.04),
         Point(0.96, 0.04),
@@ -92,21 +99,37 @@ class CornerEditorView(context: Context) : View(context) {
         if (destination.isEmpty) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                activeCorner = points.indices.minBy { index ->
+                val nearest = points.indices.minBy { index ->
                     val point = displayPoint(points[index])
                     hypot((event.x - point.first).toDouble(), (event.y - point.second).toDouble())
                 }
+                val handle = displayPoint(points[nearest])
+                val distance = hypot(
+                    (event.x - handle.first).toDouble(),
+                    (event.y - handle.second).toDouble(),
+                )
+                // Only a touch near a handle grabs it — a stray tap must not
+                // teleport a corner across the image.
+                if (distance > GRAB_RADIUS_DP * resources.displayMetrics.density) return false
+                activeCorner = nearest
+                // Drag preserves the initial finger-to-handle offset so the
+                // corner is not buried under the fingertip.
+                grabOffsetX = handle.first - event.x
+                grabOffsetY = handle.second - event.y
                 parent.requestDisallowInterceptTouchEvent(true)
                 updateCorner(event.x, event.y)
+                showMagnifier()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 updateCorner(event.x, event.y)
+                showMagnifier()
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 updateCorner(event.x, event.y)
                 activeCorner = -1
+                magnifier?.dismiss()
                 parent.requestDisallowInterceptTouchEvent(false)
                 performClick()
                 return true
@@ -120,11 +143,25 @@ class CornerEditorView(context: Context) : View(context) {
         return true
     }
 
+    /**
+     * PhotoScan-style loupe: while dragging, the exact pixels under the
+     * handle are shown magnified and offset away from the finger.
+     */
+    private fun showMagnifier() {
+        if (activeCorner !in points.indices) return
+        val loupe = magnifier ?: android.widget.Magnifier.Builder(this)
+            .setInitialZoom(2.5f)
+            .build()
+            .also { magnifier = it }
+        val handle = displayPoint(points[activeCorner])
+        loupe.show(handle.first, handle.second)
+    }
+
     private fun updateCorner(x: Float, y: Float) {
         if (activeCorner !in points.indices) return
         points[activeCorner] = Point(
-            ((x - destination.left) / destination.width()).toDouble().coerceIn(0.0, 1.0),
-            ((y - destination.top) / destination.height()).toDouble().coerceIn(0.0, 1.0),
+            ((x + grabOffsetX - destination.left) / destination.width()).toDouble().coerceIn(0.0, 1.0),
+            ((y + grabOffsetY - destination.top) / destination.height()).toDouble().coerceIn(0.0, 1.0),
         )
         invalidate()
     }

@@ -1302,6 +1302,7 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
         "archival_scale",
         "derivatives",
         "error",
+        "extensions",
     }
     if not validator.require_keys(data, "", required):
         return sorted(validator.issues)
