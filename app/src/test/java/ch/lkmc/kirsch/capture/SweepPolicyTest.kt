@@ -8,7 +8,7 @@ import org.junit.Test
 class SweepPolicyTest {
     private fun policy(
         minFrames: Int = 5,
-        maxFrames: Int = 18,
+        maxFrames: Int = 20,
         maxDurationNs: Long = 20_000_000_000L,
     ) = SweepPolicy(
         frameWidth = 256,
@@ -65,20 +65,47 @@ class SweepPolicyTest {
                 leg(10, 0.0, 3.0) + leg(20, 0.0, -3.0),
         )
         assertTrue(decision.complete)
-        assertFalse(decision.timedOut)
+        assertFalse(decision.endedEarly)
         assertEquals(1f, decision.progress)
         assertTrue("kept ${decision.keptCount}", decision.keptCount >= 5)
-        assertTrue("kept ${decision.keptCount}", decision.keptCount <= 18)
+        assertTrue("kept ${decision.keptCount}", decision.keptCount <= 20)
     }
 
     @Test
     fun redundantFramesInsideCoveredTerritoryAreNotKept() {
-        val policy = policy()
+        // minFrames low enough that the redundancy gate, not the
+        // minimum-frame grant, decides the outcome.
+        val policy = policy(minFrames = 2)
         sweep(policy, leg(10, 3.0, 0.0))
-        // Return toward the origin: covered ground, nothing new to keep
-        // once minFrames views exist.
-        val back = policy.observe(-6.0, 0.0, 100.0, 999_000_000L)
+        // Step back into covered ground: spacing passes (9 > 6.4) but no
+        // direction is extended, so the frame must not be kept.
+        val back = policy.observe(-12.0, 0.0, 100.0, 999_000_000L)
         assertFalse(back.keep)
+    }
+
+    @Test
+    fun subSpacingCreepCannotBurnTheFrameBudget() {
+        val policy = policy(minFrames = 2)
+        sweep(policy, leg(4, 7.0, 0.0))
+        // A sideways move passes spacing and extends +y meaningfully: kept.
+        val sideways = policy.observe(0.5, 7.0, 100.0, 500_000_000L)
+        assertTrue(sideways.keep)
+        // Moving back: spacing passes again via the wiggle, but +x has crept
+        // only half a pixel and +y returns to covered ground. Nothing
+        // extends by at least the spacing, so the frame must not be kept —
+        // otherwise wiggling would burn the budget without real coverage.
+        val creep = policy.observe(0.5, -7.0, 100.0, 540_000_000L)
+        assertFalse(creep.keep)
+    }
+
+    @Test
+    fun frameCapReportsHonestProgressInsteadOfFullRing() {
+        val policy = policy(minFrames = 1, maxFrames = 4)
+        sweep(policy, leg(10, 7.0, 0.0))
+        val decision = policy.observe(7.0, 0.0, 100.0, 999_000_000L)
+        assertTrue(decision.complete)
+        assertTrue(decision.endedEarly)
+        assertTrue("progress ${decision.progress}", decision.progress < 1f)
     }
 
     @Test
@@ -98,7 +125,7 @@ class SweepPolicyTest {
         policy.observe(0.0, 0.0, 100.0, 0L)
         val decision = policy.observe(0.0, 0.0, 100.0, 1_000_000_001L)
         assertTrue(decision.complete)
-        assertTrue(decision.timedOut)
+        assertTrue(decision.endedEarly)
         assertTrue(decision.progress < 1f)
     }
 

@@ -25,7 +25,6 @@ import ch.lkmc.kirsch.derivative.DerivativeStore
 import ch.lkmc.kirsch.derivative.RestorationRecipe
 import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
-import java.time.Instant
 import org.json.JSONObject
 import org.opencv.core.Point
 
@@ -215,14 +214,12 @@ class ReviewActivity : Activity() {
                     require(record.getString("state") == "review") { "Only a scan in review can be saved" }
                     record to requireNotNull(manifestFile.parentFile)
                 }
+                // The slow MediaStore write runs outside the manifest lock;
+                // accept() re-checks the state and records the export
+                // atomically, so a race can at worst duplicate a gallery
+                // image, never corrupt the manifest.
                 val galleryUri = exportToGallery(record, root)
-                DerivativeStore.accept(manifestFile)
-                ScanManifestStore.update(manifestFile) { manifest ->
-                    val extensions = manifest.optJSONObject("extensions") ?: JSONObject()
-                    extensions.put("gallery_uri", galleryUri.toString())
-                    extensions.put("gallery_saved_utc", Instant.now().toString())
-                    manifest.put("extensions", extensions)
-                }
+                DerivativeStore.accept(manifestFile, galleryUri.toString())
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread

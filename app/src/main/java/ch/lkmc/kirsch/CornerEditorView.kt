@@ -27,6 +27,12 @@ class CornerEditorView(context: Context) : View(context) {
         style = Paint.Style.FILL
         setShadowLayer(resources.displayMetrics.density * 3, 0f, 0f, Color.BLACK)
     }
+    private val reticlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = resources.displayMetrics.density * 1.5f
+        setShadowLayer(resources.displayMetrics.density * 2, 0f, 0f, Color.BLACK)
+    }
     private var bitmap: Bitmap? = null
     private val destination = RectF()
     private var activeCorner = -1
@@ -91,7 +97,36 @@ class CornerEditorView(context: Context) : View(context) {
             canvas.drawLine(first.first, first.second, second.first, second.second, edgePaint)
         }
         val radius = 12 * resources.displayMetrics.density
-        displayPoints.forEach { canvas.drawCircle(it.first, it.second, radius, handlePaint) }
+        displayPoints.forEachIndexed { index, point ->
+            if (index == activeCorner) {
+                // While dragging, the pixels at the corner must stay visible
+                // both on screen and inside the Magnifier (which snapshots
+                // this view's rendering): draw an open reticle, not a disc.
+                canvas.drawCircle(point.first, point.second, radius, reticlePaint)
+                for ((dx, dy) in arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)) {
+                    canvas.drawLine(
+                        point.first + dx * radius * 0.45f,
+                        point.second + dy * radius * 0.45f,
+                        point.first + dx * radius * 0.95f,
+                        point.second + dy * radius * 0.95f,
+                        reticlePaint,
+                    )
+                }
+            } else {
+                canvas.drawCircle(point.first, point.second, radius, handlePaint)
+            }
+        }
+    }
+
+    override fun setEnabled(enabled: Boolean) {
+        super.setEnabled(enabled)
+        if (!enabled) {
+            // A mid-drag disable would otherwise swallow ACTION_UP and leave
+            // the magnifier frozen on screen.
+            activeCorner = -1
+            magnifier?.dismiss()
+            invalidate()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

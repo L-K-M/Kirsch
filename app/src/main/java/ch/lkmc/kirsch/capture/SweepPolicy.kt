@@ -38,7 +38,7 @@ class SweepPolicy(
         /** Fusion needs at least this many views before completion. */
         val minFrames: Int = 5,
         /** Hard cap on persisted frames per sweep. */
-        val maxFrames: Int = 18,
+        val maxFrames: Int = 20,
         /** The sweep ends with whatever was gathered after this long. */
         val maxDurationNs: Long = 20_000_000_000L,
         /** Frames sharper than this fraction of the recent best pass the stability gate. */
@@ -62,7 +62,12 @@ class SweepPolicy(
         /** Monotonic 0..1 per direction, ordered right (+x), down (+y), left (-x), up (-y). */
         val directionProgress: FloatArray,
         val keptCount: Int,
-        val timedOut: Boolean,
+        /**
+         * True when the sweep ended (time limit or frame cap) before
+         * reaching directional coverage — the ring shows honest progress
+         * instead of snapping to 100%, and the capture records a warning.
+         */
+        val endedEarly: Boolean,
     )
 
     private val directionTarget = settings.directionReachFraction * frameWidth
@@ -78,7 +83,7 @@ class SweepPolicy(
     private var keptCount = 0
     private var firstTimestampNs = Long.MIN_VALUE
     private var completed = false
-    private var timedOut = false
+    private var endedEarly = false
     private var bestProgress = 0f
 
     init {
@@ -104,14 +109,16 @@ class SweepPolicy(
             val spaced = keptCount == 0 ||
                 hypot(positionX - lastKeptX, positionY - lastKeptY) >= minSpacing
             // Redundant views are skipped so the frame budget is spent on
-            // frames that extend coverage — and a direction stops counting
-            // once it reaches its target, so no single direction can consume
-            // the budget and complete the sweep through the frame cap alone.
+            // frames that extend coverage. An extension must be at least the
+            // keep spacing (sub-pixel creep spaced by sideways wiggle would
+            // otherwise burn the budget), and a direction stops counting
+            // once it reaches its target, so no motion pattern can consume
+            // the budget without making real coverage progress.
             val extendsCoverage = keptCount < settings.minFrames ||
-                (positionX > reach[0] && reach[0] < directionTarget) ||
-                (positionY > reach[1] && reach[1] < directionTarget) ||
-                (-positionX > reach[2] && reach[2] < directionTarget) ||
-                (-positionY > reach[3] && reach[3] < directionTarget)
+                (positionX >= reach[0] + minSpacing && reach[0] < directionTarget) ||
+                (positionY >= reach[1] + minSpacing && reach[1] < directionTarget) ||
+                (-positionX >= reach[2] + minSpacing && reach[2] < directionTarget) ||
+                (-positionY >= reach[3] + minSpacing && reach[3] < directionTarget)
             if (spaced && extendsCoverage && (sharpEnough || keptCount == 0)) {
                 keep = true
                 keptCount += 1
@@ -139,16 +146,19 @@ class SweepPolicy(
                 timestampNs - firstTimestampNs >= settings.maxDurationNs
             if (enough || capped || expired) {
                 completed = true
-                timedOut = expired && !enough && !capped
+                // The frame cap and the time limit are safety exits, not
+                // success: the ring must not claim coverage that was never
+                // achieved.
+                endedEarly = !enough
             }
         }
         return Decision(
             keep = keep,
             complete = completed,
-            progress = if (completed && !timedOut) 1f else bestProgress,
+            progress = if (completed && !endedEarly) 1f else bestProgress,
             directionProgress = directions,
             keptCount = keptCount,
-            timedOut = timedOut,
+            endedEarly = endedEarly,
         )
     }
 }

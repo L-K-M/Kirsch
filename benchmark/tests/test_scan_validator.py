@@ -111,6 +111,11 @@ class ScanPackageValidatorTest(unittest.TestCase):
             path = root / "scan.json"
             path.write_text(json.dumps(manifest))
             self.assertEqual([], validate_scan_package(path))
+            path.write_text(json.dumps(dict(manifest, extensions="not-an-object")))
+            self.assertIn(
+                "TYPE_OBJECT",
+                [issue.code for issue in validate_scan_package(path)],
+            )
 
     def test_rejects_mutated_derivative(self):
         with tempfile.TemporaryDirectory() as directory:

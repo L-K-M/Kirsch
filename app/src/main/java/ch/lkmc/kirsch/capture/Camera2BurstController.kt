@@ -800,11 +800,11 @@ class Camera2BurstController(
         listener.onSweepProgress(decision.progress, decision.keptCount, decision.directionProgress)
         if (decision.complete && !sweep.stopped) {
             sweep.stopped = true
-            cameraHandler.post { finishSweep(sweep, decision.keptCount, decision.timedOut) }
+            cameraHandler.post { finishSweep(sweep, decision.keptCount, decision.endedEarly) }
         }
     }
 
-    private fun finishSweep(sweep: SweepSession, keptCount: Int, timedOut: Boolean) {
+    private fun finishSweep(sweep: SweepSession, keptCount: Int, endedEarly: Boolean) {
         if (sweepSession !== sweep || generation != sweep.generation) return
         val writer = activeWriter ?: return
         if (writer.captureId != sweep.captureId) return
@@ -813,10 +813,10 @@ class Camera2BurstController(
         } catch (_: CameraAccessException) {
             // The session is torn down elsewhere; finalization proceeds.
         }
-        if (timedOut) {
+        if (endedEarly) {
             writer.addWarning(
-                "Sweep ended at the time limit before reaching the displacement target; " +
-                    "expect residual glare where no view was unsaturated",
+                "Sweep ended (time limit or frame cap) before reaching directional " +
+                    "coverage; expect residual glare where no view was unsaturated",
             )
         }
         if (keptCount == 0) {
