@@ -42,4 +42,24 @@ class TimestampPairerTest {
 
         assertEquals(listOf("first", "second"), dropped)
     }
+
+    @Test
+    fun evictsOldestUnmatchedResultsSoSweepSkipsCannotAccumulate() {
+        val pairs = mutableListOf<Pair<String, String>>()
+        val pairer = TimestampPairer<String, String>(
+            maxPendingImages = 1,
+            onPair = { image, result -> pairs += image to result },
+            onDropImage = {},
+            maxPendingResults = 2,
+        )
+
+        pairer.addResult(1, "r1")
+        pairer.addResult(2, "r2")
+        pairer.addResult(3, "r3")
+        pairer.addImage(1, "late-image")
+        pairer.addImage(3, "recent-image")
+
+        assertEquals(listOf("recent-image" to "r3"), pairs)
+        assertEquals(1 to 1, pairer.pendingCounts())
+    }
 }
