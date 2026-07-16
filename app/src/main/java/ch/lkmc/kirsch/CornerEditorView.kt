@@ -44,7 +44,9 @@ class CornerEditorView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = resources.displayMetrics.density * 3.5f
     }
-    private val handleHaloWidth = resources.displayMetrics.density * 1.5f
+    // A solid ring reads heavier than the soft 3dp shadow blur it replaces;
+    // 2dp keeps comparable contrast against busy content without bulk.
+    private val handleHaloWidth = resources.displayMetrics.density * 2f
     // Allocated once: onDraw runs on every drag frame.
     private val reticlePaints = arrayOf(reticleHaloPaint, reticlePaint)
     private val reticleDirections = arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)
