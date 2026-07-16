@@ -1,5 +1,9 @@
 package ch.lkmc.kirsch.imaging
 
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.min
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 
@@ -14,6 +18,74 @@ object ConservativeFusion {
         val output = Mat(height, width, CvType.CV_8UC3)
         val confidence = Mat(height, width, CvType.CV_8UC1)
         val failure = Mat(height, width, CvType.CV_8UC1)
+        // Every row is computed independently from that row's inputs alone, so
+        // splitting the row range across workers is a pure speedup: the output
+        // is byte-identical to the sequential order. Mat.get/put on disjoint
+        // rows are plain native copies with no shared state, and Future.get
+        // provides the happens-before edge for the workers' writes.
+        val workers = min(height, maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
+        if (workers <= 1) {
+            fuseRows(images, masks, referenceIndex, 0, height, width, output, confidence, failure)
+        } else {
+            val executor = Executors.newFixedThreadPool(workers)
+            try {
+                val bandRows = (height + workers - 1) / workers
+                val bands = (0 until workers).mapNotNull { band ->
+                    val rowStart = band * bandRows
+                    val rowEnd = min(height, rowStart + bandRows)
+                    if (rowStart >= rowEnd) {
+                        null
+                    } else {
+                        executor.submit {
+                            fuseRows(images, masks, referenceIndex, rowStart, rowEnd, width, output, confidence, failure)
+                        }
+                    }
+                }
+                try {
+                    bands.forEach { band -> band.get() }
+                } catch (error: ExecutionException) {
+                    // Best-effort cancellation: the row loops are
+                    // compute-bound native calls, so interruption may not
+                    // stop bands that already started; the first failure is
+                    // what the caller reports either way.
+                    executor.shutdownNow()
+                    throw error.cause ?: error
+                } catch (interrupted: InterruptedException) {
+                    executor.shutdownNow()
+                    Thread.currentThread().interrupt()
+                    throw interrupted
+                }
+            } finally {
+                executor.shutdown()
+                // On success every future was already awaited, so this
+                // returns immediately. After a failure it blocks until the
+                // surviving bands stop, guaranteeing no worker touches the
+                // output Mats once fuse() unwinds.
+                var interrupted = false
+                while (!executor.isTerminated) {
+                    try {
+                        executor.awaitTermination(1, TimeUnit.SECONDS)
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+        }
+        return Result(output, confidence, failure)
+    }
+
+    private fun fuseRows(
+        images: List<Mat>,
+        masks: List<Mat>,
+        referenceIndex: Int,
+        rowStart: Int,
+        rowEnd: Int,
+        width: Int,
+        output: Mat,
+        confidence: Mat,
+        failure: Mat,
+    ) {
         val imageRows = images.map { ByteArray(width * 3) }
         val maskRows = masks.map { ByteArray(width) }
         val outputRow = ByteArray(width * 3)
@@ -21,7 +93,7 @@ object ConservativeFusion {
         val failureRow = ByteArray(width)
         val sampleIndices = IntArray(images.size)
         val sampleLumas = IntArray(images.size)
-        for (row in 0 until height) {
+        for (row in rowStart until rowEnd) {
             images.forEachIndexed { index, image ->
                 image.get(row, 0, imageRows[index])
                 masks[index].get(row, 0, maskRows[index])
@@ -76,6 +148,5 @@ object ConservativeFusion {
             confidence.put(row, 0, confidenceRow)
             failure.put(row, 0, failureRow)
         }
-        return Result(output, confidence, failure)
     }
 }
