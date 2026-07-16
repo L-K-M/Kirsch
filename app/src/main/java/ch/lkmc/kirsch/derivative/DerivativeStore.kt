@@ -119,8 +119,14 @@ object DerivativeStore {
      * Accepts (locks) a scan, optionally recording the photo-library export
      * in the same atomic manifest transaction: the state re-check, the state
      * flip, and the export record land together or not at all.
+     * [gallerySourcePath] records which derivative (relative to the scan
+     * root) was exported, so provenance survives the user's version choice.
      */
-    fun accept(scanManifest: File, galleryUri: String? = null) = ScanManifestStore.locked {
+    fun accept(
+        scanManifest: File,
+        galleryUri: String? = null,
+        gallerySourcePath: String? = null,
+    ) = ScanManifestStore.locked {
         val manifest = JSONObject(scanManifest.readText())
         require(manifest.getString("state") == "review") { "Only a scan in review can be accepted" }
         manifest.put("state", "accepted").put("accepted_utc", Instant.now().toString())
@@ -128,6 +134,7 @@ object DerivativeStore {
             val extensions = manifest.optJSONObject("extensions") ?: JSONObject()
             extensions.put("gallery_uri", galleryUri)
             extensions.put("gallery_saved_utc", Instant.now().toString())
+            if (gallerySourcePath != null) extensions.put("gallery_source_path", gallerySourcePath)
             manifest.put("extensions", extensions)
         }
         ScanManifestStore.write(scanManifest, manifest)
