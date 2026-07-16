@@ -81,16 +81,36 @@ object Yuv420Packer {
         require(startX >= 0 && startY >= 0)
         val buffer = source.duplicate()
         val base = buffer.position()
+        // Strides are positive, so the last pixel of the last row is the
+        // highest index ever read; checking it once bounds every access.
+        // Long arithmetic keeps the check valid even for geometries whose
+        // byte offsets would overflow Int.
+        val lastIndex = base.toLong() +
+            (startY + height - 1).toLong() * rowStride +
+            (startX + width - 1).toLong() * pixelStride
+        require(lastIndex < buffer.limit()) {
+            "plane buffer is too small for declared strides and crop"
+        }
         val output = ByteArray(width * height)
-        var outputIndex = 0
-        for (row in 0 until height) {
-            for (column in 0 until width) {
-                val sourceIndex =
-                    base + (startY + row) * rowStride + (startX + column) * pixelStride
-                require(sourceIndex < buffer.limit()) {
-                    "plane buffer is too small for declared strides and crop"
+        if (pixelStride == 1) {
+            for (row in 0 until height) {
+                buffer.position(base + (startY + row) * rowStride + startX)
+                buffer.get(output, row * width, width)
+            }
+        } else {
+            // Interleaved plane (typically UV with pixelStride 2): bulk-read
+            // each row once, then de-interleave in memory instead of issuing
+            // one bounds-checked ByteBuffer read per pixel.
+            val rowBytes = ByteArray((width - 1) * pixelStride + 1)
+            for (row in 0 until height) {
+                buffer.position(base + (startY + row) * rowStride + startX * pixelStride)
+                buffer.get(rowBytes, 0, rowBytes.size)
+                var sourceIndex = 0
+                var outputIndex = row * width
+                for (column in 0 until width) {
+                    output[outputIndex++] = rowBytes[sourceIndex]
+                    sourceIndex += pixelStride
                 }
-                output[outputIndex++] = buffer.get(sourceIndex)
             }
         }
         return output
