@@ -64,6 +64,17 @@ class Yuv420PackerTest {
     }
 
     @Test
+    fun boundsCheckCoversTheFullBulkReadSpan() {
+        // The bulk row read spans (width - 1) * pixelStride + 1 bytes; the
+        // buffer is exactly that long, so the read must fit with no slack.
+        val source = ByteBuffer.wrap(byteArrayOf(7, 0, 0, 8))
+        assertArrayEquals(
+            byteArrayOf(7, 8),
+            Yuv420Packer.copyPlane(source, rowStride = 8, pixelStride = 3, width = 2, height = 1),
+        )
+    }
+
+    @Test
     fun rejectsBufferSmallerThanDeclaredGeometry() {
         val source = ByteBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
         assertThrows(IllegalArgumentException::class.java) {
