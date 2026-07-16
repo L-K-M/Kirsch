@@ -53,6 +53,25 @@ class Yuv420PackerTest {
     }
 
     @Test
+    fun copiesInterleavedRowWithoutTrailingPadding() {
+        // The last row ends exactly at the final sampled byte; no padding
+        // beyond it may be required to exist.
+        val source = ByteBuffer.wrap(byteArrayOf(1, 9, 2, 9, 3))
+        assertArrayEquals(
+            byteArrayOf(1, 2, 3),
+            Yuv420Packer.copyPlane(source, rowStride = 6, pixelStride = 2, width = 3, height = 1),
+        )
+    }
+
+    @Test
+    fun rejectsBufferSmallerThanDeclaredGeometry() {
+        val source = ByteBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertThrows(IllegalArgumentException::class.java) {
+            Yuv420Packer.copyPlane(source, rowStride = 3, pixelStride = 1, width = 3, height = 2)
+        }
+    }
+
+    @Test
     fun rejectsOddI420CropGeometry() {
         assertThrows(IllegalArgumentException::class.java) {
             Yuv420Packer.requireEvenI420Crop(left = 1, top = 0, width = 4, height = 4)
