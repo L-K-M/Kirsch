@@ -40,12 +40,15 @@ object ConservativeFusion {
                         }
                     }
                 }
-                bands.forEach { band ->
-                    try {
-                        band.get()
-                    } catch (error: ExecutionException) {
-                        throw error.cause ?: error
-                    }
+                try {
+                    bands.forEach { band -> band.get() }
+                } catch (error: ExecutionException) {
+                    // Best-effort cancellation: the row loops are
+                    // compute-bound native calls, so interruption may not
+                    // stop bands that already started; the first failure is
+                    // what the caller reports either way.
+                    executor.shutdownNow()
+                    throw error.cause ?: error
                 }
             } finally {
                 executor.shutdown()
