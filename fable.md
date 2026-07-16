@@ -168,7 +168,7 @@ benchmark note rather than hot-patched.
 ### Q6. Rectified output size comes from max opposing edge lengths
 `PrintGeometry.rectify()` sizes output by the longer of each opposing edge pair, which
 slightly stretches the shorter side; aspect is not cross-checked against the
-homography-implied aspect (PLAN §3.4 "perspective rectification must preserve inferred
+homography-implied aspect (`PLAN.md` §3.4 "perspective rectification must preserve inferred
 aspect ratio"). Minor geometric fidelity item for the benchmark to quantify.
 
 ### Q7. Exported JPEG carries no metadata at all (also a UX issue, see M6)
