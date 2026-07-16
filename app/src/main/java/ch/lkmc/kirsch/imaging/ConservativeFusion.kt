@@ -2,6 +2,7 @@ package ch.lkmc.kirsch.imaging
 
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -56,6 +57,19 @@ object ConservativeFusion {
                 }
             } finally {
                 executor.shutdown()
+                // On success every future was already awaited, so this
+                // returns immediately. After a failure it blocks until the
+                // surviving bands stop, guaranteeing no worker touches the
+                // output Mats once fuse() unwinds.
+                var interrupted = false
+                while (!executor.isTerminated) {
+                    try {
+                        executor.awaitTermination(1, TimeUnit.SECONDS)
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+                if (interrupted) Thread.currentThread().interrupt()
             }
         }
         return Result(output, confidence, failure)
