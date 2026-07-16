@@ -1057,7 +1057,9 @@ class Camera2BurstController(
         finishSuccess = true
         listener.onBusyChanged(false)
         if (manifest != null) {
-            status("Capture package: ${writer.outputDirectory()}")
+            // The package path is diagnostic detail; the UI chip gets its
+            // product-level message from onCaptureFinished handling.
+            Log.i("Kirsch", "Capture package: ${writer.outputDirectory()}")
             listener.onCaptureFinished(manifest.absolutePath)
         }
         if (shutdownPending) completeShutdown()

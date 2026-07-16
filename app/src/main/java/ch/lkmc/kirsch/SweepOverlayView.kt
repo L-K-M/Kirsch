@@ -5,6 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
+import android.view.animation.AnimationUtils
+import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.min
 
 /**
@@ -41,6 +44,11 @@ class SweepOverlayView(context: Context) : View(context) {
         strokeWidth = 6f * density
         strokeCap = Paint.Cap.ROUND
     }
+    private val flourishPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFB84D.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+    }
     private val percentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFF3EDE2.toInt()
         textSize = 26f * density
@@ -70,6 +78,20 @@ class SweepOverlayView(context: Context) : View(context) {
     private var framingHint: String = ""
     private var sweepHint: String = ""
 
+    // Measured motion arrives in bursts, so the drawn ring chases the
+    // reported values with a short exponential ease instead of jumping.
+    // This is pure rendering: the underlying progress stays motion-only.
+    private var displayedProgress = 0f
+    private val displayedDirections = FloatArray(4)
+    private var lastFrameMs = 0L
+    private var flourishStartMs = 0L
+
+    private companion object {
+        const val CHASE_RATE = 11f
+        const val SETTLE_EPSILON = 0.003f
+        const val FLOURISH_DURATION_MS = 450L
+    }
+
     fun showFraming(hint: String) {
         mode = Mode.FRAMING
         framingHint = hint
@@ -80,6 +102,10 @@ class SweepOverlayView(context: Context) : View(context) {
         if (mode != Mode.SWEEPING) {
             progress = 0f
             directions = FloatArray(4)
+            displayedProgress = 0f
+            displayedDirections.fill(0f)
+            lastFrameMs = 0L
+            flourishStartMs = 0L
         }
         mode = Mode.SWEEPING
         sweepHint = hint
@@ -128,6 +154,15 @@ class SweepOverlayView(context: Context) : View(context) {
     }
 
     private fun drawSweeping(canvas: Canvas) {
+        val now = AnimationUtils.currentAnimationTimeMillis()
+        val deltaSeconds = if (lastFrameMs == 0L) 0f else ((now - lastFrameMs) / 1000f).coerceIn(0f, 0.1f)
+        lastFrameMs = now
+        val blend = 1f - exp(-deltaSeconds * CHASE_RATE)
+        displayedProgress += (progress - displayedProgress) * blend
+        for (index in displayedDirections.indices) {
+            displayedDirections[index] += (directions[index] - displayedDirections[index]) * blend
+        }
+
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
         val centerX = width / 2f
         val centerY = height * 0.42f
@@ -137,14 +172,34 @@ class SweepOverlayView(context: Context) : View(context) {
         for (index in segmentCenters.indices) {
             val center = segmentCenters[index]
             canvas.drawArc(arcBounds, center - segmentSpan / 2, segmentSpan, false, trackPaint)
-            val sweep = segmentSpan * directions[index].coerceIn(0f, 1f)
+            val sweep = segmentSpan * displayedDirections[index].coerceIn(0f, 1f)
             if (sweep > 0f) {
                 canvas.drawArc(arcBounds, center - sweep / 2, sweep, false, arcPaint)
             }
         }
-        val percent = "${(progress * 100).toInt()}%"
+        val percent = "${(displayedProgress * 100).toInt()}%"
         canvas.drawText(percent, centerX, centerY + percentPaint.textSize / 3f, percentPaint)
         drawHint(canvas, sweepHint, centerY + radius + 34f * density)
+
+        // A completed sweep (a genuinely covered one reports exactly 1)
+        // gets a brief expanding-ring flourish while the frames persist.
+        if (progress >= 1f && flourishStartMs == 0L && displayedProgress > 0.995f) {
+            flourishStartMs = now
+        }
+        var flourishing = false
+        if (flourishStartMs != 0L) {
+            val phase = ((now - flourishStartMs).toFloat() / FLOURISH_DURATION_MS).coerceIn(0f, 1f)
+            if (phase < 1f) {
+                flourishing = true
+                val ease = 1f - (1f - phase) * (1f - phase)
+                flourishPaint.alpha = (140 * (1f - phase)).toInt()
+                canvas.drawCircle(centerX, centerY, radius + 16f * density * ease, flourishPaint)
+            }
+        }
+
+        val settling = abs(progress - displayedProgress) > SETTLE_EPSILON ||
+            displayedDirections.indices.any { abs(directions[it] - displayedDirections[it]) > SETTLE_EPSILON }
+        if (settling || flourishing) postInvalidateOnAnimation()
     }
 
     private fun drawHint(canvas: Canvas, hint: String, top: Float) {
