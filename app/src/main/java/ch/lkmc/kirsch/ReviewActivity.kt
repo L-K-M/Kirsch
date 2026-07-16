@@ -36,6 +36,7 @@ class ReviewActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        EdgeToEdge.apply(window)
         manifestFile = File(requireNotNull(intent.getStringExtra(EXTRA_MANIFEST)))
         buildUi()
         loadScan()
@@ -175,6 +176,16 @@ class ReviewActivity : Activity() {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                     ),
                 )
+                setOnApplyWindowInsetsListener { _, insets ->
+                    val bars = EdgeToEdge.systemBarInsets(insets)
+                    content.setPadding(
+                        dp(20) + bars.left,
+                        dp(16) + bars.top,
+                        dp(20) + bars.right,
+                        dp(28) + bars.bottom,
+                    )
+                    insets
+                }
             },
         )
     }

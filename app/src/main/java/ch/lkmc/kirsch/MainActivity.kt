@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -58,6 +59,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        EdgeToEdge.apply(window)
         buildUi()
         controller = Camera2BurstController(this, textureView, this)
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -372,6 +374,20 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
                 leftMargin = dp(20)
             },
         )
+        // The preview stays full-bleed; the chrome moves inside the system
+        // bars and display cutout.
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = EdgeToEdge.systemBarInsets(insets)
+            controls.setPadding(dp(24) + bars.left, dp(20), dp(24) + bars.right, dp(36) + bars.bottom)
+            statusChip.layoutParams = (statusChip.layoutParams as FrameLayout.LayoutParams).apply {
+                topMargin = dp(56) + bars.top
+            }
+            title.layoutParams = (title.layoutParams as FrameLayout.LayoutParams).apply {
+                topMargin = dp(18) + bars.top
+                leftMargin = dp(20) + bars.left
+            }
+            insets
+        }
         setContentView(root)
     }
 
