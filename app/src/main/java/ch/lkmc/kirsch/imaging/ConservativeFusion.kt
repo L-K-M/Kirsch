@@ -1,5 +1,8 @@
 package ch.lkmc.kirsch.imaging
 
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import kotlin.math.min
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 
@@ -14,6 +17,54 @@ object ConservativeFusion {
         val output = Mat(height, width, CvType.CV_8UC3)
         val confidence = Mat(height, width, CvType.CV_8UC1)
         val failure = Mat(height, width, CvType.CV_8UC1)
+        // Every row is computed independently from that row's inputs alone, so
+        // splitting the row range across workers is a pure speedup: the output
+        // is byte-identical to the sequential order. Mat.get/put on disjoint
+        // rows are plain native copies with no shared state, and Future.get
+        // provides the happens-before edge for the workers' writes.
+        val workers = min(height, maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
+        if (workers <= 1) {
+            fuseRows(images, masks, referenceIndex, 0, height, output, confidence, failure)
+        } else {
+            val executor = Executors.newFixedThreadPool(workers)
+            try {
+                val bandRows = (height + workers - 1) / workers
+                val bands = (0 until workers).mapNotNull { band ->
+                    val rowStart = band * bandRows
+                    val rowEnd = min(height, rowStart + bandRows)
+                    if (rowStart >= rowEnd) {
+                        null
+                    } else {
+                        executor.submit {
+                            fuseRows(images, masks, referenceIndex, rowStart, rowEnd, output, confidence, failure)
+                        }
+                    }
+                }
+                bands.forEach { band ->
+                    try {
+                        band.get()
+                    } catch (error: ExecutionException) {
+                        throw error.cause ?: error
+                    }
+                }
+            } finally {
+                executor.shutdown()
+            }
+        }
+        return Result(output, confidence, failure)
+    }
+
+    private fun fuseRows(
+        images: List<Mat>,
+        masks: List<Mat>,
+        referenceIndex: Int,
+        rowStart: Int,
+        rowEnd: Int,
+        output: Mat,
+        confidence: Mat,
+        failure: Mat,
+    ) {
+        val width = images[0].cols()
         val imageRows = images.map { ByteArray(width * 3) }
         val maskRows = masks.map { ByteArray(width) }
         val outputRow = ByteArray(width * 3)
@@ -21,7 +72,7 @@ object ConservativeFusion {
         val failureRow = ByteArray(width)
         val sampleIndices = IntArray(images.size)
         val sampleLumas = IntArray(images.size)
-        for (row in 0 until height) {
+        for (row in rowStart until rowEnd) {
             images.forEachIndexed { index, image ->
                 image.get(row, 0, imageRows[index])
                 masks[index].get(row, 0, maskRows[index])
@@ -76,6 +127,5 @@ object ConservativeFusion {
             confidence.put(row, 0, confidenceRow)
             failure.put(row, 0, failureRow)
         }
-        return Result(output, confidence, failure)
     }
 }
