@@ -256,34 +256,38 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
 
     private fun showLibraryDialog() {
         val root = ScanProcessor(this).scanRoot()
-        val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
-            ?.map { File(it, "scan.json") }
-            ?.filter { manifest ->
-                runCatching {
-                    JSONObject(manifest.readText()).optString("state") in setOf("review", "accepted")
-                }.getOrDefault(false)
+        // Listing every scan directory and parsing each manifest is file
+        // I/O that stalls the main thread once a library accumulates.
+        Thread({
+            val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
+                ?.mapNotNull { directory ->
+                    val manifest = File(directory, "scan.json")
+                    runCatching {
+                        val record = JSONObject(manifest.readText())
+                        val state = when (record.optString("state")) {
+                            "accepted" -> getString(R.string.scan_state_accepted)
+                            "review" -> getString(R.string.scan_state_review)
+                            else -> return@runCatching null
+                        }
+                        manifest to "${record.getString("scan_id")} · $state"
+                    }.getOrNull()
+                }
+                ?.sortedByDescending { it.first.parentFile?.name }
+                .orEmpty()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (scans.isEmpty()) {
+                    showStatus(getString(R.string.no_scans))
+                    return@runOnUiThread
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.library_title)
+                    .setItems(scans.map { it.second }.toTypedArray()) { _, index ->
+                        startActivity(ReviewActivity.intent(this, scans[index].first))
+                    }
+                    .show()
             }
-            ?.sortedByDescending { it.parentFile?.name }
-            .orEmpty()
-        if (scans.isEmpty()) {
-            showStatus(getString(R.string.no_scans))
-            return
-        }
-        val labels = scans.map { manifest ->
-            val record = JSONObject(manifest.readText())
-            val state = if (record.optString("state") == "accepted") {
-                getString(R.string.scan_state_accepted)
-            } else {
-                getString(R.string.scan_state_review)
-            }
-            "${record.getString("scan_id")} · $state"
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.library_title)
-            .setItems(labels.toTypedArray()) { _, index ->
-                startActivity(ReviewActivity.intent(this, scans[index]))
-            }
-            .show()
+        }, "kirsch-library").start()
     }
 
     private fun buildUi() {

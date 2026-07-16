@@ -37,22 +37,30 @@ object ScanQueue {
     }
 
     fun resumePending(context: Context, listener: Listener? = null) {
-        val captures = context.getExternalFilesDir("captures") ?: File(context.filesDir, "captures")
-        captures.listFiles { file -> file.isDirectory && File(file, "capture.json").isFile }
-            ?.sortedBy(File::getName)
-            ?.forEach { directory ->
-                val acceptedCapture = runCatching {
-                    JSONObject(File(directory, "capture.json").readText()).let {
-                        it.optString("status") == "accepted" && it.optString("mode") == "yuv-420-888"
-                    }
-                }.getOrDefault(false)
-                if (!acceptedCapture) return@forEach
-                val scan = File(ScanProcessor(context).scanRoot(), "${directory.name}/scan.json")
-                val completed = scan.isFile && runCatching {
-                    val state = JSONObject(scan.readText()).optString("state")
-                    state == "review" || state == "accepted" || state == "failed"
-                }.getOrDefault(false)
-                if (!completed) enqueue(context, File(directory, "capture.json"), listener)
-            }
+        // Walking every capture directory and parsing its manifests is file
+        // I/O; callers invoke this from the main thread (Activity.onResume),
+        // so the scan happens on the queue's own worker. The application
+        // context is captured so a resumed Activity is not retained.
+        val applicationContext = context.applicationContext
+        executor.execute {
+            val captures = applicationContext.getExternalFilesDir("captures")
+                ?: File(applicationContext.filesDir, "captures")
+            captures.listFiles { file -> file.isDirectory && File(file, "capture.json").isFile }
+                ?.sortedBy(File::getName)
+                ?.forEach { directory ->
+                    val acceptedCapture = runCatching {
+                        JSONObject(File(directory, "capture.json").readText()).let {
+                            it.optString("status") == "accepted" && it.optString("mode") == "yuv-420-888"
+                        }
+                    }.getOrDefault(false)
+                    if (!acceptedCapture) return@forEach
+                    val scan = File(ScanProcessor(applicationContext).scanRoot(), "${directory.name}/scan.json")
+                    val completed = scan.isFile && runCatching {
+                        val state = JSONObject(scan.readText()).optString("state")
+                        state == "review" || state == "accepted" || state == "failed"
+                    }.getOrDefault(false)
+                    if (!completed) enqueue(applicationContext, File(directory, "capture.json"), listener)
+                }
+        }
     }
 }
