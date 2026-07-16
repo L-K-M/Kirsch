@@ -2,6 +2,7 @@ package ch.lkmc.kirsch.scan
 
 import android.content.Context
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.Executors
 import org.json.JSONObject
 
@@ -40,8 +41,11 @@ object ScanQueue {
         // Walking every capture directory and parsing its manifests is file
         // I/O; callers invoke this from the main thread (Activity.onResume),
         // so the scan happens on the queue's own worker. The application
-        // context is captured so a resumed Activity is not retained.
+        // context replaces the caller's, and the listener is held weakly:
+        // queued processing can run for minutes, and callbacks were already
+        // best-effort (a recreated Activity re-subscribes on its own resume).
         val applicationContext = context.applicationContext
+        val weakListener = listener?.let(::WeakReference)
         executor.execute {
             val captures = applicationContext.getExternalFilesDir("captures")
                 ?: File(applicationContext.filesDir, "captures")
@@ -59,7 +63,9 @@ object ScanQueue {
                         val state = JSONObject(scan.readText()).optString("state")
                         state == "review" || state == "accepted" || state == "failed"
                     }.getOrDefault(false)
-                    if (!completed) enqueue(applicationContext, File(directory, "capture.json"), listener)
+                    if (!completed) {
+                        enqueue(applicationContext, File(directory, "capture.json"), weakListener?.get())
+                    }
                 }
         }
     }

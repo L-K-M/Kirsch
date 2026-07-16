@@ -63,7 +63,12 @@ class ReviewActivity : Activity() {
         Thread({
             val loaded = runCatching(::readScan)
             runOnUiThread {
-                if (isFinishing || isDestroyed || generation != loadGeneration) return@runOnUiThread
+                if (isFinishing || isDestroyed || generation != loadGeneration) {
+                    // A superseded or abandoned load frees its bitmap right
+                    // away instead of waiting for the GC to notice it.
+                    loaded.getOrNull()?.bitmap?.recycle()
+                    return@runOnUiThread
+                }
                 loaded.fold(
                     onSuccess = { scan ->
                         cornerEditor.setImage(scan.bitmap)
