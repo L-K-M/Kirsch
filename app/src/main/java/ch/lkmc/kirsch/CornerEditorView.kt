@@ -44,6 +44,7 @@ class CornerEditorView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = resources.displayMetrics.density * 3.5f
     }
+    private val handleHaloWidth = resources.displayMetrics.density * 1.5f
     private var bitmap: Bitmap? = null
     private val destination = RectF()
     private var activeCorner = -1
@@ -125,8 +126,7 @@ class CornerEditorView(context: Context) : View(context) {
                     }
                 }
             } else {
-                val halo = resources.displayMetrics.density * 1.5f
-                canvas.drawCircle(point.first, point.second, radius + halo, handleHaloPaint)
+                canvas.drawCircle(point.first, point.second, radius + handleHaloWidth, handleHaloPaint)
                 canvas.drawCircle(point.first, point.second, radius, handlePaint)
             }
         }
