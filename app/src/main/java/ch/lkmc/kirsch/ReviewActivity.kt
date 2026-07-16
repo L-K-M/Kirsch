@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -25,6 +26,11 @@ import ch.lkmc.kirsch.derivative.DerivativeStore
 import ch.lkmc.kirsch.derivative.RestorationRecipe
 import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
+import java.text.SimpleDateFormat
+import java.time.Instant
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import org.json.JSONObject
 import org.opencv.core.Point
 
@@ -202,30 +208,91 @@ class ReviewActivity : Activity() {
         }, "kirsch-derivative").start()
     }
 
+    private class ExportChoice(val label: String, val relativePath: String)
+
     /**
-     * Finishing a scan runs in fail-closed order: the current output JPEG
-     * goes into the device photo library first (the user-visible
-     * deliverable), then the scan is accepted (locked), then the export is
-     * recorded in the scan manifest's extensions.
+     * Restored derivatives are separate copies that never replace the
+     * master, so finishing a scan asks which version goes to the photo
+     * library when restored copies exist. Without the chooser, an
+     * enhancement the user just created would be silently ignored by the
+     * export.
      */
     private fun saveScan() {
+        Thread({
+            val choices = runCatching(::exportChoices)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                choices.fold(
+                    onSuccess = { list ->
+                        if (list.size <= 1) performSave(list.first()) else showSaveChooser(list)
+                    },
+                    onFailure = {
+                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                    },
+                )
+            }
+        }, "kirsch-save-choices").start()
+    }
+
+    private fun exportChoices(): List<ExportChoice> {
+        val manifest = ScanManifestStore.locked { JSONObject(manifestFile.readText()) }
+        val choices = mutableListOf(
+            ExportChoice(getString(R.string.save_version_master), manifest.getString("preview_path")),
+        )
+        val derivatives = manifest.optJSONArray("derivatives")
+        if (derivatives != null) {
+            for (index in 0 until derivatives.length()) {
+                val record = derivatives.getJSONObject(index)
+                if (record.optString("kind") != "restored") continue
+                val recipe = record.optString("recipe")
+                val label = RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
+                choices += ExportChoice(
+                    getString(R.string.save_version_restored, label),
+                    record.getString("path"),
+                )
+            }
+        }
+        return choices
+    }
+
+    private fun showSaveChooser(choices: List<ExportChoice>) {
+        var selected = 0
+        AlertDialog.Builder(this)
+            .setTitle(R.string.save_version_title)
+            .setSingleChoiceItems(choices.map(ExportChoice::label).toTypedArray(), 0) { _, index ->
+                selected = index
+            }
+            .setPositiveButton(R.string.save_version_confirm) { _, _ -> performSave(choices[selected]) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * Finishing a scan runs in fail-closed order: the chosen JPEG goes into
+     * the device photo library first (the user-visible deliverable), then
+     * the scan is accepted (locked), then the export and its source path are
+     * recorded in the scan manifest's extensions.
+     */
+    private fun performSave(choice: ExportChoice) {
         status.text = getString(R.string.saving_scan)
         editingControls.forEach { it.isEnabled = false }
         cornerEditor.isEnabled = false
         Thread({
             val result = runCatching {
-                val (record, root) = ScanManifestStore.locked {
+                val (record, source) = ScanManifestStore.locked {
                     val record = JSONObject(manifestFile.readText())
                     require(record.getString("state") == "review") { "Only a scan in review can be saved" }
-                    record to requireNotNull(manifestFile.parentFile)
+                    val source = File(requireNotNull(manifestFile.parentFile), choice.relativePath)
+                    require(source.isFile) { "Export source is missing: ${choice.relativePath}" }
+                    record to source
                 }
                 // The slow MediaStore write runs outside the manifest lock;
                 // accept() re-checks the state and records the export
                 // atomically. If a race loses that re-check, its gallery row
                 // is removed so no orphan duplicate stays behind.
-                val galleryUri = exportToGallery(record, root)
+                val galleryUri = exportToGallery(record, source)
                 try {
-                    DerivativeStore.accept(manifestFile, galleryUri.toString())
+                    DerivativeStore.accept(manifestFile, galleryUri.toString(), choice.relativePath)
                 } catch (error: Throwable) {
                     contentResolver.delete(galleryUri, null, null)
                     throw error
@@ -248,29 +315,65 @@ class ReviewActivity : Activity() {
         }, "kirsch-save").start()
     }
 
-    private fun exportToGallery(record: JSONObject, root: File): Uri {
-        val preview = File(root, record.getString("preview_path"))
+    private fun exportToGallery(record: JSONObject, source: File): Uri {
+        // The gallery copy gets a human-readable name and real timestamps;
+        // the machine scan_id stays in EXIF ImageDescription for provenance.
+        val takenMs = runCatching { Instant.parse(record.getString("created_utc")).toEpochMilli() }
+            .getOrDefault(System.currentTimeMillis())
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date(takenMs))
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "${record.getString("scan_id")}.jpg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, "Kirsch-$stamp.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Kirsch")
+            put(MediaStore.Images.Media.DATE_TAKEN, takenMs)
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val uri = contentResolver.insert(collection, values)
-            ?: error("The photo library rejected the scan")
+        val staged = stageWithExif(source, record, takenMs)
         try {
-            contentResolver.openOutputStream(uri)?.use { output ->
-                preview.inputStream().use { input -> input.copyTo(output) }
-            } ?: error("Could not write to the photo library")
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            contentResolver.update(uri, values, null, null)
+            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val uri = contentResolver.insert(collection, values)
+                ?: error("The photo library rejected the scan")
+            try {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    staged.inputStream().use { input -> input.copyTo(output) }
+                } ?: error("Could not write to the photo library")
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                contentResolver.update(uri, values, null, null)
+            } catch (error: Throwable) {
+                contentResolver.delete(uri, null, null)
+                throw error
+            }
+            return uri
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /**
+     * Copies the export source into cache and stamps EXIF creation time,
+     * software, and the scan ID before the bytes leave app storage. The
+     * on-disk derivative itself stays untouched (its recorded hash must not
+     * change).
+     */
+    private fun stageWithExif(source: File, record: JSONObject, takenMs: Long): File {
+        val staged = File(cacheDir, "gallery-export-${UUID.randomUUID()}.jpg")
+        try {
+            source.copyTo(staged, overwrite = true)
+            val versionName = packageManager.getPackageInfo(packageName, 0).versionName
+            val exif = ExifInterface(staged.absolutePath)
+            exif.setAttribute(
+                ExifInterface.TAG_DATETIME_ORIGINAL,
+                SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.ROOT).format(Date(takenMs)),
+            )
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Kirsch ${versionName.orEmpty()}".trim())
+            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, record.getString("scan_id"))
+            exif.saveAttributes()
+            return staged
         } catch (error: Throwable) {
-            contentResolver.delete(uri, null, null)
+            staged.delete()
             throw error
         }
-        return uri
     }
 
     private fun showArchivalScaleDialog() {
