@@ -49,6 +49,10 @@ object ConservativeFusion {
                     // what the caller reports either way.
                     executor.shutdownNow()
                     throw error.cause ?: error
+                } catch (interrupted: InterruptedException) {
+                    executor.shutdownNow()
+                    Thread.currentThread().interrupt()
+                    throw interrupted
                 }
             } finally {
                 executor.shutdown()
