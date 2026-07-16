@@ -24,7 +24,7 @@ object ConservativeFusion {
         // provides the happens-before edge for the workers' writes.
         val workers = min(height, maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
         if (workers <= 1) {
-            fuseRows(images, masks, referenceIndex, 0, height, output, confidence, failure)
+            fuseRows(images, masks, referenceIndex, 0, height, width, output, confidence, failure)
         } else {
             val executor = Executors.newFixedThreadPool(workers)
             try {
@@ -36,7 +36,7 @@ object ConservativeFusion {
                         null
                     } else {
                         executor.submit {
-                            fuseRows(images, masks, referenceIndex, rowStart, rowEnd, output, confidence, failure)
+                            fuseRows(images, masks, referenceIndex, rowStart, rowEnd, width, output, confidence, failure)
                         }
                     }
                 }
@@ -67,11 +67,11 @@ object ConservativeFusion {
         referenceIndex: Int,
         rowStart: Int,
         rowEnd: Int,
+        width: Int,
         output: Mat,
         confidence: Mat,
         failure: Mat,
     ) {
-        val width = images[0].cols()
         val imageRows = images.map { ByteArray(width * 3) }
         val maskRows = masks.map { ByteArray(width) }
         val outputRow = ByteArray(width * 3)
