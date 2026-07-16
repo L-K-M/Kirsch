@@ -45,6 +45,9 @@ class CornerEditorView(context: Context) : View(context) {
         strokeWidth = resources.displayMetrics.density * 3.5f
     }
     private val handleHaloWidth = resources.displayMetrics.density * 1.5f
+    // Allocated once: onDraw runs on every drag frame.
+    private val reticlePaints = arrayOf(reticleHaloPaint, reticlePaint)
+    private val reticleDirections = arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)
     private var bitmap: Bitmap? = null
     private val destination = RectF()
     private var activeCorner = -1
@@ -113,9 +116,9 @@ class CornerEditorView(context: Context) : View(context) {
                 // While dragging, the pixels at the corner must stay visible
                 // both on screen and inside the Magnifier (which snapshots
                 // this view's rendering): draw an open reticle, not a disc.
-                for (paint in arrayOf(reticleHaloPaint, reticlePaint)) {
+                for (paint in reticlePaints) {
                     canvas.drawCircle(point.first, point.second, radius, paint)
-                    for ((dx, dy) in arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)) {
+                    for ((dx, dy) in reticleDirections) {
                         canvas.drawLine(
                             point.first + dx * radius * 0.45f,
                             point.second + dy * radius * 0.45f,
