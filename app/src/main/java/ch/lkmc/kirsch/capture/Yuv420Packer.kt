@@ -83,7 +83,11 @@ object Yuv420Packer {
         val base = buffer.position()
         // Strides are positive, so the last pixel of the last row is the
         // highest index ever read; checking it once bounds every access.
-        val lastIndex = base + (startY + height - 1) * rowStride + (startX + width - 1) * pixelStride
+        // Long arithmetic keeps the check valid even for geometries whose
+        // byte offsets would overflow Int.
+        val lastIndex = base.toLong() +
+            (startY + height - 1).toLong() * rowStride +
+            (startX + width - 1).toLong() * pixelStride
         require(lastIndex < buffer.limit()) {
             "plane buffer is too small for declared strides and crop"
         }
