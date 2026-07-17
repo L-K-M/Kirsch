@@ -78,7 +78,11 @@ class ReviewActivity : Activity() {
                         editingControls.forEach { it.isEnabled = scan.editable }
                     },
                     onFailure = {
-                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                        // A task that already succeeded keeps its message
+                        // even if only the reload fails, so the user is not
+                        // told the operation failed when it did not.
+                        status.text = statusOverride
+                            ?: getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
                     },
                 )
                 if (statusOverride != null) status.announceForAccessibility(status.text)

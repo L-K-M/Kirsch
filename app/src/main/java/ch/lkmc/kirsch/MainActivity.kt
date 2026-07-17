@@ -264,34 +264,44 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         // Listing every scan directory and parsing each manifest is file
         // I/O that stalls the main thread once a library accumulates.
         Thread({
-            val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
-                ?.mapNotNull { directory ->
-                    val manifest = File(directory, "scan.json")
-                    runCatching {
-                        val record = JSONObject(manifest.readText())
-                        val state = when (record.optString("state")) {
-                            "accepted" -> getString(R.string.scan_state_accepted)
-                            "review" -> getString(R.string.scan_state_review)
-                            else -> return@runCatching null
-                        }
-                        manifest to "${record.getString("scan_id")} · $state"
-                    }.getOrNull()
-                }
-                ?.sortedByDescending { it.first.parentFile?.name }
-                .orEmpty()
+            // The whole body is guarded so an I/O failure still clears
+            // libraryLoading — otherwise the button would be dead until the
+            // app restarts.
+            val scans = runCatching {
+                root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
+                    ?.mapNotNull { directory ->
+                        val manifest = File(directory, "scan.json")
+                        runCatching {
+                            val record = JSONObject(manifest.readText())
+                            val state = when (record.optString("state")) {
+                                "accepted" -> getString(R.string.scan_state_accepted)
+                                "review" -> getString(R.string.scan_state_review)
+                                else -> return@runCatching null
+                            }
+                            manifest to "${record.getString("scan_id")} · $state"
+                        }.getOrNull()
+                    }
+                    ?.sortedByDescending { it.first.parentFile?.name }
+                    .orEmpty()
+            }
             runOnUiThread {
                 libraryLoading = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                if (scans.isEmpty()) {
-                    showStatus(getString(R.string.no_scans))
-                    return@runOnUiThread
-                }
-                AlertDialog.Builder(this)
-                    .setTitle(R.string.library_title)
-                    .setItems(scans.map { it.second }.toTypedArray()) { _, index ->
-                        startActivity(ReviewActivity.intent(this, scans[index].first))
-                    }
-                    .show()
+                scans.fold(
+                    onSuccess = { list ->
+                        if (list.isEmpty()) {
+                            showStatus(getString(R.string.no_scans))
+                        } else {
+                            AlertDialog.Builder(this)
+                                .setTitle(R.string.library_title)
+                                .setItems(list.map { it.second }.toTypedArray()) { _, index ->
+                                    startActivity(ReviewActivity.intent(this, list[index].first))
+                                }
+                                .show()
+                        }
+                    },
+                    onFailure = { showStatus(getString(R.string.no_scans)) },
+                )
             }
         }, "kirsch-library").start()
     }

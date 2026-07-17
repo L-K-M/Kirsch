@@ -47,6 +47,7 @@ object ScanQueue {
         val applicationContext = context.applicationContext
         val weakListener = listener?.let(::WeakReference)
         executor.execute {
+            val scanRoot = ScanProcessor(applicationContext).scanRoot()
             val captures = applicationContext.getExternalFilesDir("captures")
                 ?: File(applicationContext.filesDir, "captures")
             captures.listFiles { file -> file.isDirectory && File(file, "capture.json").isFile }
@@ -58,7 +59,7 @@ object ScanQueue {
                         }
                     }.getOrDefault(false)
                     if (!acceptedCapture) return@forEach
-                    val scan = File(ScanProcessor(applicationContext).scanRoot(), "${directory.name}/scan.json")
+                    val scan = File(scanRoot, "${directory.name}/scan.json")
                     val completed = scan.isFile && runCatching {
                         val state = JSONObject(scan.readText()).optString("state")
                         state == "review" || state == "accepted" || state == "failed"
