@@ -121,7 +121,7 @@ into any future ReviewActivity work.
 `onPause → controller.stop()` marks the active capture failed with no confirmation and
 no user-visible explanation beyond a chip that is immediately covered by the framing
 hint. Consider an in-sweep back interception ("Cancel this scan?") or at least a clear
-"Scan cancelled" message. UX-level; see U4.
+"Scan cancelled" message. UX-level.
 
 ---
 
@@ -303,7 +303,7 @@ sweeps are eating storage.
 Restored derivatives are files you can never look at (B3/B4). The review screen should
 render the current output, list derivatives, and offer a press-and-hold before/after
 toggle — the confidence/failure maps already exist on disk and would make a genuinely
-distinctive "show me what fusion did" overlay (see D2).
+distinctive "show me what fusion did" overlay (see D1).
 
 ### M3. No storage lifecycle for capture packages
 Each sweep retains up to 22 × ~18 MB of I420 frames (~400 MB per scan) plus a ~20 MB
@@ -360,7 +360,7 @@ permission, UX) — carried forward.
 ### G1. The evidence-gated culture is excellent — preserve it
 The honesty infrastructure (fail-closed feature catalog, provenance manifests, hashes,
 no fabricated capabilities, immutable accepted revisions) is the most distinctive
-engineering asset in this codebase. Future UI work should surface it (D2) rather than
+engineering asset in this codebase. Future UI work should surface it (D1) rather than
 bury it.
 
 ### G2. All UI is hand-built in code
