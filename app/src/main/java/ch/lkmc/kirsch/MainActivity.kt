@@ -54,6 +54,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     private var previewWidth = 0
     private var previewHeight = 0
     private var pendingReviewScanId: String? = null
+    private var libraryLoading = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -255,6 +256,10 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     }
 
     private fun showLibraryDialog() {
+        // Both the flag flips and the click that reads it run on the main
+        // thread; without the guard a double-tap would stack two dialogs.
+        if (libraryLoading) return
+        libraryLoading = true
         val root = ScanProcessor(this).scanRoot()
         // Listing every scan directory and parsing each manifest is file
         // I/O that stalls the main thread once a library accumulates.
@@ -275,6 +280,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
                 ?.sortedByDescending { it.first.parentFile?.name }
                 .orEmpty()
             runOnUiThread {
+                libraryLoading = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (scans.isEmpty()) {
                     showStatus(getString(R.string.no_scans))
