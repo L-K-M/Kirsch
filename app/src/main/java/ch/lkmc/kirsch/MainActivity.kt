@@ -54,6 +54,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     private var previewWidth = 0
     private var previewHeight = 0
     private var pendingReviewScanId: String? = null
+    private var libraryLoading = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -255,35 +256,54 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     }
 
     private fun showLibraryDialog() {
+        // Both the flag flips and the click that reads it run on the main
+        // thread; without the guard a double-tap would stack two dialogs.
+        if (libraryLoading) return
+        libraryLoading = true
         val root = ScanProcessor(this).scanRoot()
-        val scans = root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
-            ?.map { File(it, "scan.json") }
-            ?.filter { manifest ->
-                runCatching {
-                    JSONObject(manifest.readText()).optString("state") in setOf("review", "accepted")
-                }.getOrDefault(false)
+        // Listing every scan directory and parsing each manifest is file
+        // I/O that stalls the main thread once a library accumulates.
+        Thread({
+            // The whole body is guarded so an I/O failure still clears
+            // libraryLoading — otherwise the button would be dead until the
+            // app restarts.
+            val scans = runCatching {
+                root.listFiles { directory -> directory.isDirectory && File(directory, "scan.json").isFile }
+                    ?.mapNotNull { directory ->
+                        val manifest = File(directory, "scan.json")
+                        runCatching {
+                            val record = JSONObject(manifest.readText())
+                            val state = when (record.optString("state")) {
+                                "accepted" -> getString(R.string.scan_state_accepted)
+                                "review" -> getString(R.string.scan_state_review)
+                                else -> return@runCatching null
+                            }
+                            manifest to "${record.getString("scan_id")} · $state"
+                        }.getOrNull()
+                    }
+                    ?.sortedByDescending { it.first.parentFile?.name }
+                    .orEmpty()
             }
-            ?.sortedByDescending { it.parentFile?.name }
-            .orEmpty()
-        if (scans.isEmpty()) {
-            showStatus(getString(R.string.no_scans))
-            return
-        }
-        val labels = scans.map { manifest ->
-            val record = JSONObject(manifest.readText())
-            val state = if (record.optString("state") == "accepted") {
-                getString(R.string.scan_state_accepted)
-            } else {
-                getString(R.string.scan_state_review)
+            runOnUiThread {
+                libraryLoading = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                scans.fold(
+                    onSuccess = { list ->
+                        if (list.isEmpty()) {
+                            showStatus(getString(R.string.no_scans))
+                        } else {
+                            AlertDialog.Builder(this)
+                                .setTitle(R.string.library_title)
+                                .setItems(list.map { it.second }.toTypedArray()) { _, index ->
+                                    startActivity(ReviewActivity.intent(this, list[index].first))
+                                }
+                                .show()
+                        }
+                    },
+                    onFailure = { showStatus(getString(R.string.no_scans)) },
+                )
             }
-            "${record.getString("scan_id")} · $state"
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.library_title)
-            .setItems(labels.toTypedArray()) { _, index ->
-                startActivity(ReviewActivity.intent(this, scans[index]))
-            }
-            .show()
+        }, "kirsch-library").start()
     }
 
     private fun buildUi() {
