@@ -14,6 +14,17 @@ if ! command -v adb >/dev/null 2>&1; then
     exit 1
 fi
 
+case "${1:-}" in
+    -h|--help)
+        echo "usage: $0 [device-serial]"
+        echo "Build the debug APK and adb-install it; pass a serial (or set ANDROID_SERIAL) when several devices are attached."
+        exit 0
+        ;;
+    -*)
+        echo "usage: $0 [device-serial]" >&2
+        exit 2
+        ;;
+esac
 if [ "$#" -gt 1 ]; then
     echo "usage: $0 [device-serial]" >&2
     exit 2
