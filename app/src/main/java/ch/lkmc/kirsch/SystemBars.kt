@@ -28,13 +28,15 @@ object SystemBars {
     /**
      * Adds the system-bar and display-cutout insets to [view]'s existing
      * padding on the requested edges. Insets are passed on unconsumed, so
-     * sibling views in the same window can react to them too.
+     * descendant views still receive them in full.
      *
      * Call once per view, before insets have been dispatched to it —
      * typically while building the layout. The view's padding at call time
      * becomes the baseline the insets are added to, so calling this again
      * after a dispatch would take already-inset padding as the new baseline
-     * and double it.
+     * and double it. For the same reason, do not nest padded views: because
+     * insets are passed on unconsumed, a descendant that also calls this
+     * applies them a second time.
      */
     fun pad(
         view: View,
