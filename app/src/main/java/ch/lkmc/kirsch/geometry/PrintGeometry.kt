@@ -102,11 +102,24 @@ object PrintGeometry {
      * focal length that makes the two vanishing directions orthogonal, then
      * measure the rectangle in that camera's frame.
      *
-     * Returns null when the construction degenerates — a near-frontal view
-     * makes the quadrilateral nearly a parallelogram and both vanishing points
-     * run off to infinity, and a corner set that is not a projected rectangle
-     * gives a negative focal length. In both cases the projected edge lengths
-     * are already the best available estimate, so the caller falls back.
+     * Returns null when the construction degenerates, and the caller falls
+     * back to the projected edge lengths. Three ways that happens, and they
+     * are not equally benign:
+     *
+     * - **Near-frontal view.** Both vanishing points run off to infinity.
+     *   The projected edges are then already exactly the physical ratio, so
+     *   the fallback loses nothing.
+     * - **Single-axis tilt.** A phone held level side to side but tipped
+     *   forward over a print keeps one pair of edges parallel in the image,
+     *   so only one vanishing point is finite and no focal length can be
+     *   solved for. The fallback is *not* accurate here — a 3:2 print at 35
+     *   degrees of pure pitch comes out about 30% too wide. Recovering it
+     *   needs the camera's own focal length in pixels, which means recording
+     *   SENSOR_INFO_PHYSICAL_SIZE alongside the LENS_FOCAL_LENGTH the
+     *   capture package already stores, and threading intrinsics into
+     *   processing. That is a separate change.
+     * - **Corners that are not a projected rectangle.** The solve gives a
+     *   negative focal length; there is nothing to recover.
      *
      * [points] must be in the order this object produces: top-left,
      * top-right, bottom-right, bottom-left.

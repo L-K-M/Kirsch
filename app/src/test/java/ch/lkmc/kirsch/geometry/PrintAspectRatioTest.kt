@@ -8,6 +8,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.opencv.core.Point
 
 /**
  * The recovered aspect ratio is checked against synthetic projections of
@@ -33,7 +34,7 @@ class PrintAspectRatioTest {
         heightMm: Double,
         tiltXDegrees: Double,
         tiltYDegrees: Double,
-    ): List<org.opencv.core.Point> {
+    ): List<Point> {
         val centerX = IMAGE_WIDTH / 2.0
         val centerY = IMAGE_HEIGHT / 2.0
         val a = Math.toRadians(tiltXDegrees)
@@ -48,22 +49,22 @@ class PrintAspectRatioTest {
             val depthFromX = y * sin(a)
             val cameraX = x * cos(b) + depthFromX * sin(b)
             val cameraZ = -x * sin(b) + depthFromX * cos(b) + DISTANCE
-            org.opencv.core.Point(
+            Point(
                 FOCAL * cameraX / cameraZ + centerX,
                 FOCAL * rotatedY / cameraZ + centerY,
             )
         }
     }
 
-    private fun projectedEdgeRatio(points: List<org.opencv.core.Point>): Double {
-        fun distance(first: org.opencv.core.Point, second: org.opencv.core.Point) =
+    private fun projectedEdgeRatio(points: List<Point>): Double {
+        fun distance(first: Point, second: Point) =
             hypot(first.x - second.x, first.y - second.y)
         val width = maxOf(distance(points[0], points[1]), distance(points[3], points[2]))
         val height = maxOf(distance(points[0], points[3]), distance(points[1], points[2]))
         return width / height
     }
 
-    private fun recovered(points: List<org.opencv.core.Point>): Double {
+    private fun recovered(points: List<Point>): Double {
         val ratio = PrintGeometry.aspectRatio(points, IMAGE_WIDTH, IMAGE_HEIGHT)
         assertNotNull("expected a recovered aspect ratio", ratio)
         return ratio!!
@@ -110,13 +111,34 @@ class PrintAspectRatioTest {
     }
 
     @Test
+    fun aSingleAxisTiltFallsBackAndTheFallbackIsNotAccurate() {
+        // A phone held level side to side but tipped forward keeps the top
+        // and bottom edges parallel in the image, so only one vanishing point
+        // is finite and no focal length can be solved for. Unlike the frontal
+        // case, the projected-edge fallback is materially wrong here — pinned
+        // so the limitation is a known property rather than a surprise, and
+        // so a later intrinsics-based fix has something to improve on.
+        val pitch = project(widthMm = 150.0, heightMm = 100.0, tiltXDegrees = 35.0, tiltYDegrees = 0.0)
+        assertNull(PrintGeometry.aspectRatio(pitch, IMAGE_WIDTH, IMAGE_HEIGHT))
+        assertTrue(projectedEdgeRatio(pitch) / 1.5 - 1.0 > 0.25)
+
+        val yaw = project(widthMm = 150.0, heightMm = 100.0, tiltXDegrees = 0.0, tiltYDegrees = 35.0)
+        assertNull(PrintGeometry.aspectRatio(yaw, IMAGE_WIDTH, IMAGE_HEIGHT))
+
+        // Barely any second-axis tilt is enough to make the solve work, which
+        // is why the two-axis cases above recover exactly.
+        val nearlyPitch = project(widthMm = 150.0, heightMm = 100.0, tiltXDegrees = 35.0, tiltYDegrees = 2.0)
+        assertEquals(1.5, recovered(nearlyPitch), 1e-4)
+    }
+
+    @Test
     fun rejectsMalformedInput() {
         val square = project(widthMm = 100.0, heightMm = 100.0, tiltXDegrees = 20.0, tiltYDegrees = 20.0)
         assertNull(PrintGeometry.aspectRatio(square.take(3), IMAGE_WIDTH, IMAGE_HEIGHT))
         assertNull(PrintGeometry.aspectRatio(square, 0, IMAGE_HEIGHT))
         assertNull(
             PrintGeometry.aspectRatio(
-                square.dropLast(1) + org.opencv.core.Point(Double.NaN, 0.0),
+                square.dropLast(1) + Point(Double.NaN, 0.0),
                 IMAGE_WIDTH,
                 IMAGE_HEIGHT,
             ),
