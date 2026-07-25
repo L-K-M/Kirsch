@@ -29,6 +29,12 @@ object SystemBars {
      * Adds the system-bar and display-cutout insets to [view]'s existing
      * padding on the requested edges. Insets are passed on unconsumed, so
      * sibling views in the same window can react to them too.
+     *
+     * Call once per view, before insets have been dispatched to it —
+     * typically while building the layout. The view's padding at call time
+     * becomes the baseline the insets are added to, so calling this again
+     * after a dispatch would take already-inset padding as the new baseline
+     * and double it.
      */
     fun pad(
         view: View,
@@ -42,9 +48,12 @@ object SystemBars {
         val startTop = view.paddingTop
         val startRight = view.paddingRight
         val startBottom = view.paddingBottom
+        // Fixed for the life of the listener, which fires on every IME
+        // animation frame, rotation, and multi-window change.
+        val types = WindowInsets.Type.systemBars() or
+            WindowInsets.Type.displayCutout() or
+            if (includeIme) WindowInsets.Type.ime() else 0
         view.setOnApplyWindowInsetsListener { target, insets ->
-            var types = WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
-            if (includeIme) types = types or WindowInsets.Type.ime()
             val bars = insets.getInsets(types)
             target.setPadding(
                 startLeft + if (left) bars.left else 0,
