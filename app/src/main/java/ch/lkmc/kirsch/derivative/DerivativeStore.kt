@@ -83,7 +83,11 @@ object DerivativeStore {
             val entry = derivatives.getJSONObject(index)
             if (entry.optString("kind") == "restored") continue
             val path = entry.optString("path")
-            if (!path.endsWith(".jpg")) continue
+            // The graph also holds the TIFF container and the confidence and
+            // failure maps; only a JPEG can be the presented output. Records
+            // written by ScanProcessor carry media_type, records appended here
+            // do not, so both signals are accepted.
+            if (entry.optString("media_type") != "image/jpeg" && !path.endsWith(".jpg")) continue
             target = path
         }
         val path = requireNotNull(target) { "This scan has no unrestored copy to return to" }
