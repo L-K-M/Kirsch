@@ -26,7 +26,8 @@ Accepted YUV acquisitions enter a process-death-recoverable single-worker queue.
 3. normalizes by exposure-time × sensitivity where metadata permits
 4. registers frames to the middle observation with ORB and MAGSAC++ homographies
 5. rejects weak registration and falls back visibly to the best single frame
-6. applies conservative glare-aware temporal selection and emits confidence/failure maps
+6. applies conservative glare-aware temporal selection, averages the views that
+   agree with the selected one, and emits confidence/failure maps
 7. detects print quadrilaterals, rectifies the largest candidate, and always permits manual correction
 8. writes a high-quality JPEG and a 16-bit TIFF container
 
