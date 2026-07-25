@@ -105,6 +105,23 @@ class Yuv420PackerTest {
     }
 
     @Test
+    fun contiguousRowsStopAtTheRowWidth() {
+        // Real camera planes are row-padded: rowStride exceeds width even
+        // when pixelStride is 1. The bulk read must take the row, not the
+        // padding after it.
+        val source = ByteBuffer.wrap(
+            byteArrayOf(
+                1, 2, 3, 77, 77, 77,
+                4, 5, 6, 88, 88, 88,
+            ),
+        )
+        assertArrayEquals(
+            byteArrayOf(1, 2, 3, 4, 5, 6),
+            Yuv420Packer.copyPlane(source, rowStride = 6, pixelStride = 1, width = 3, height = 2),
+        )
+    }
+
+    @Test
     fun rejectsOddI420CropGeometry() {
         assertThrows(IllegalArgumentException::class.java) {
             Yuv420Packer.requireEvenI420Crop(left = 1, top = 0, width = 4, height = 4)

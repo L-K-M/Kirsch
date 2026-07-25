@@ -110,12 +110,14 @@ object Yuv420Packer {
                 buffer.get(output, outputIndex, width)
                 outputIndex += width
             } else {
+                // Indices along a row only increase, so checking the last one
+                // covers the whole row here too.
+                val lastIndex = rowStart + (width - 1) * pixelStride
+                require(rowStart >= 0 && lastIndex < limit) {
+                    "plane buffer is too small for declared strides and crop"
+                }
                 for (column in 0 until width) {
-                    val sourceIndex = rowStart + column * pixelStride
-                    require(sourceIndex < limit) {
-                        "plane buffer is too small for declared strides and crop"
-                    }
-                    output[outputIndex++] = buffer.get(sourceIndex)
+                    output[outputIndex++] = buffer.get(rowStart + column * pixelStride)
                 }
             }
         }
