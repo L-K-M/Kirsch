@@ -53,12 +53,24 @@ class ConservativeFusionTest {
     }
 
     @Test
-    fun twoViewsKeepSingleSampleBehaviour() {
-        // Below three views there is nothing to reject against, so the
-        // conservative choice is unchanged and no averaging happens.
+    fun twoDisagreeingViewsUseOnlyTheAnchor() {
+        // Below three views there is nothing to reject against, so the anchor
+        // is the brighter sample. These two are far enough apart that the
+        // agreement window cannot bridge them; two close views would still be
+        // averaged, as agreeingViewsAreAllAveraged shows.
         val selection = select(100, 220)
         assertEquals(1, selection.anchor)
         assertEquals(1, selection.size)
+    }
+
+    @Test
+    fun twoAgreeingViewsAreStillAveraged() {
+        // The agreement window does not depend on the three-view threshold:
+        // two views that agree are averaged, which is where the noise
+        // reduction on a short or heavily rejected stack comes from.
+        val selection = select(100, 105)
+        assertEquals(0, selection.first)
+        assertEquals(2, selection.lastExclusive)
     }
 
     @Test

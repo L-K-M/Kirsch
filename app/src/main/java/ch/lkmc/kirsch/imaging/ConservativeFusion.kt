@@ -138,14 +138,13 @@ object ConservativeFusion {
                     sampleLumas[insertion] = luma
                     sampleIndices[insertion] = frame
                 }
-                val outputOffset = column * 3
                 var allSaturated = validCount > 0
                 for (index in 0 until validCount) allSaturated = allSaturated && sampleLumas[index] >= 250
                 val selection = select(sampleLumas, validCount)
                 if (selection.size == 0) {
-                    outputRow[outputOffset] = imageRows[referenceIndex][sourceOffset]
-                    outputRow[outputOffset + 1] = imageRows[referenceIndex][sourceOffset + 1]
-                    outputRow[outputOffset + 2] = imageRows[referenceIndex][sourceOffset + 2]
+                    outputRow[sourceOffset] = imageRows[referenceIndex][sourceOffset]
+                    outputRow[sourceOffset + 1] = imageRows[referenceIndex][sourceOffset + 1]
+                    outputRow[sourceOffset + 2] = imageRows[referenceIndex][sourceOffset + 2]
                 } else {
                     var sumB = 0
                     var sumG = 0
@@ -158,9 +157,9 @@ object ConservativeFusion {
                     }
                     val contributors = selection.size
                     val rounding = contributors / 2
-                    outputRow[outputOffset] = ((sumB + rounding) / contributors).toByte()
-                    outputRow[outputOffset + 1] = ((sumG + rounding) / contributors).toByte()
-                    outputRow[outputOffset + 2] = ((sumR + rounding) / contributors).toByte()
+                    outputRow[sourceOffset] = ((sumB + rounding) / contributors).toByte()
+                    outputRow[sourceOffset + 1] = ((sumG + rounding) / contributors).toByte()
+                    outputRow[sourceOffset + 2] = ((sumR + rounding) / contributors).toByte()
                 }
                 confidenceRow[column] = minOf(255, validCount * 255 / confidenceDivisor).toByte()
                 failureRow[column] = if (validCount < 3 || allSaturated) 0xff.toByte() else 0
