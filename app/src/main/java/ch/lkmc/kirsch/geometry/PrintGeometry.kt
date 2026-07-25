@@ -164,17 +164,15 @@ object PrintGeometry {
     }
 
     /**
-     * Rectifies [quad] out of [image]. The output is sized from the recovered
-     * physical aspect ratio when [aspectRatio] can supply one, keeping the
-     * same total pixel count as the projected-edge estimate so no resolution
-     * is invented; otherwise the projected edges are used directly.
-     */
-    /**
      * Output pixel dimensions for a rectification. With a recovered [ratio]
      * the axes are redistributed to match it while holding the projected
      * estimate's total pixel count, so correcting the shape never invents
      * resolution. Without one, or if the arithmetic degenerates, the
      * projected lengths are used as they were.
+     *
+     * The pixel count is held to within integer truncation of both axes —
+     * under a percent — not exactly, so nothing downstream should treat it
+     * as a guarantee.
      */
     fun outputSize(projectedWidth: Double, projectedHeight: Double, ratio: Double?): Pair<Int, Int> {
         val fallback = projectedWidth.toInt().coerceAtLeast(1) to projectedHeight.toInt().coerceAtLeast(1)
@@ -186,6 +184,12 @@ object PrintGeometry {
         return correctedWidth.toInt().coerceAtLeast(1) to correctedHeight.toInt().coerceAtLeast(1)
     }
 
+    /**
+     * Rectifies [quad] out of [image]. The output is sized from the recovered
+     * physical aspect ratio when [aspectRatio] can supply one, keeping the
+     * same total pixel count as the projected-edge estimate so no resolution
+     * is invented; otherwise the projected edges are used directly.
+     */
     fun rectify(image: Mat, quad: Quad, interpolation: Int = Imgproc.INTER_CUBIC): Mat {
         val (topLeft, topRight, bottomRight, bottomLeft) = quad.points
         val projectedWidth = maxOf(distance(topLeft, topRight), distance(bottomLeft, bottomRight))
