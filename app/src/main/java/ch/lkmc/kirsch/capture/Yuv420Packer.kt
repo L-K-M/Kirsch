@@ -67,6 +67,19 @@ object Yuv420Packer {
         }
     }
 
+    /**
+     * Extracts a [width] x [height] region at ([startX], [startY]) from a
+     * strided camera plane into tightly packed bytes.
+     *
+     * A 12 MP frame is about 18 MB across its three planes, and a sweep
+     * persists up to twenty-two of them while the camera is still streaming
+     * and reader buffers are scarce. A per-sample `get(index)` walk therefore
+     * costs roughly eighteen million bounds-checked reads per frame on the
+     * capture IO path. When a row is contiguous — `pixelStride == 1`, which
+     * holds for luma on every device and for chroma on planar ones — the whole
+     * row is taken in one bulk transfer instead. The interleaved path is
+     * unchanged; NV12/NV21 chroma still needs a sample walk.
+     */
     fun copyPlane(
         source: ByteBuffer,
         rowStride: Int,
@@ -81,16 +94,29 @@ object Yuv420Packer {
         require(startX >= 0 && startY >= 0)
         val buffer = source.duplicate()
         val base = buffer.position()
+        val limit = buffer.limit()
         val output = ByteArray(width * height)
+        val contiguous = pixelStride == 1
         var outputIndex = 0
         for (row in 0 until height) {
-            for (column in 0 until width) {
-                val sourceIndex =
-                    base + (startY + row) * rowStride + (startX + column) * pixelStride
-                require(sourceIndex < buffer.limit()) {
+            val rowStart = base + (startY + row) * rowStride + startX * pixelStride
+            if (contiguous) {
+                // The last sample of the row must be readable, same bound the
+                // per-sample path enforces.
+                require(rowStart >= 0 && rowStart + width - 1 < limit) {
                     "plane buffer is too small for declared strides and crop"
                 }
-                output[outputIndex++] = buffer.get(sourceIndex)
+                buffer.position(rowStart)
+                buffer.get(output, outputIndex, width)
+                outputIndex += width
+            } else {
+                for (column in 0 until width) {
+                    val sourceIndex = rowStart + column * pixelStride
+                    require(sourceIndex < limit) {
+                        "plane buffer is too small for declared strides and crop"
+                    }
+                    output[outputIndex++] = buffer.get(sourceIndex)
+                }
             }
         }
         return output
