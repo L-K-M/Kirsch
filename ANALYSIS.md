@@ -626,8 +626,8 @@ and worth keeping exactly as it is.
 **Speed.** Shutter to usable photo in the library is roughly 20 s of sweep +
 20–45 s of processing + review interaction ≈ **a minute per photo**, against ~3
 seconds for a competing single-shot app. Glare removal justifies some of that;
-4.2 and 4.3 alone could halve the processing half, and 4.5 would make the sweep
-itself lighter.
+4.2 and 4.3 alone could roughly halve the processing time, and 4.5 would make
+the sweep itself lighter.
 
 ---
 
