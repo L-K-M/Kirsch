@@ -47,6 +47,35 @@ crash), **[S2]** significant (quality, performance or UX cost a user notices),
 | [#26](https://github.com/L-K-M/Kirsch/pull/26) | `Yuv420Packer.copyPlane` read ~18 M samples one indexed `ByteBuffer.get` at a time per frame, on the capture IO path, up to 22 times per sweep. Contiguous rows now bulk-copy. |
 | [#27](https://github.com/L-K-M/Kirsch/pull/27) | A kept sweep view evicted from the pairer before its `CaptureResult` was closed silently, stranding the target count and failing the entire capture after a 20-second sweep. Losses are now recorded and the deliverable count follows them down. |
 
+### Open PRs from earlier sessions that overlap this backlog
+
+Three PRs from a 2026-07-16 session (against the same base, `f7529e8`) were
+still open when this review was written and cover ground it also touches. They
+came out of an earlier project review, issue #13.
+
+| PR | Overlaps |
+|---|---|
+| [#19](https://github.com/L-K-M/Kirsch/pull/19) | Moves scan loading, the library listing, and `ScanQueue.resumePending` off the main thread — [§3.7](#37-s3-showlibrarydialog-parses-every-manifest-twice-on-the-ui-thread), [§3.9](#39-s3-scanqueue-retains-dead-activities), and part of [§3.3](#33-s2-reviewactivityoncreate-has-no-error-handling-at-all). |
+| [#20](https://github.com/L-K-M/Kirsch/pull/20) | **Same bug as #24**, solved differently, plus export EXIF — [§2.7](#27-s2-exported-images-carry-no-exif-no-icc-profile-no-orientation). |
+| [#21](https://github.com/L-K-M/Kirsch/pull/21) | Animates the coverage ring and moves the package path out of the status chip — [§3.5](#35-s3-developer-strings-and-filesystem-paths-in-the-user-facing-chip), [§5.5](#55-s3-the-sweep-percentage-can-look-stuck). |
+
+**#20 and #24 conflict, and not only textually.** Both fix "a restoration is
+created, reported as saved, and then not what gets exported", and they disagree
+about the remedy:
+
+- **#20** keeps `preview_path` on the master and asks *at save time* which
+  version to export, recording the choice as `gallery_source_path`.
+- **#24** makes the restoration the active output as it is created, so the
+  review screen and the export agree by construction, with **Use original
+  scan** to step back.
+
+One of them should merge, not both. #20 additionally carries the EXIF work of
+§2.7, which #24 does not; whichever way the version question is settled, that
+part is wanted either way.
+
+#19 also overlaps #24 lightly (both touch `ReviewActivity`'s reload path) and
+its own note predicts a textual conflict with #20.
+
 ### Verification still owed on landed work
 
 - **#25** is layout behaviour: build and lint are green but it has not been seen
@@ -652,11 +681,19 @@ more informative than "43%", beautiful, and *purely motion-derived*, so it stays
 inside the constraint that guidance never reacts to image content or print
 position. Pairs with recording those positions for 2.1.
 
-### 8.3 Haptics, borrowed properly
+### 8.3 Haptics, borrowed properly — blocked pending claim charts
 
 One crisp `HapticFeedbackConstants.CONFIRM` tick as each ring segment completes,
 and a double pulse on completion. That is the entire reason fingerprint
-enrollment feels good. Roughly six lines.
+enrollment feels good, and it is roughly six lines of code.
+
+**It is not six lines of decision.** `PLAN.md` §7.2 names *haptic guidance*
+alongside a live glare map, quad overlay, spoken instruction, progress metric
+and learned fusion as things that "must all be included in the final claim
+charts". Adding haptics to sweep guidance is exactly that item. PR #21 reached
+the same conclusion independently and parked it. It stays parked until the
+counsel review `PLAN.md` §7.1 calls for, and it should not be picked up as an
+easy win — this entry originally listed it as one, which was wrong.
 
 ### 8.4 Cherry
 
@@ -748,8 +785,9 @@ By user-visible improvement ÷ risk, given #22–#27:
 7. **2.2** — record `SENSOR_INFO_PHYSICAL_SIZE`, thread intrinsics into
    processing, and fix the single-axis aspect case.
 8. **6.1, 6.4, 6.6** — share, rotate, tap-to-focus. Small, obviously missing.
-9. **6.7 + 8.3** — sweep coaching and haptics. The interaction's success rate
-   depends on the user understanding it.
+9. **6.7** — sweep coaching. The interaction's success rate depends on the user
+   understanding it. (Its natural companion, haptics, is blocked on claim
+   charts — see [8.3](#83-haptics-borrowed-properly--blocked-pending-claim-charts).)
 10. **5.1** — the visual pass, whether by styling in place or by adopting
     AndroidX and Material 3.
 
