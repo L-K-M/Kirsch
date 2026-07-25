@@ -132,6 +132,57 @@ class PrintAspectRatioTest {
     }
 
     @Test
+    fun rejectsCornersWithNoRealFocalLength() {
+        // Found by search over random quads: this one drives squaredFocal
+        // negative, so no camera squares these corners up.
+        assertNull(
+            PrintGeometry.aspectRatio(
+                listOf(
+                    Point(1366.0, 592.0),
+                    Point(2543.0, 388.0),
+                    Point(2129.0, 1151.0),
+                    Point(409.0, 1519.0),
+                ),
+                IMAGE_WIDTH,
+                IMAGE_HEIGHT,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsAnImplausiblyElongatedResult() {
+        // A 30:1 strip solves exactly, so this pins the plausibility bound
+        // rather than the solver: nothing a user scans is that elongated, and
+        // a ratio out there means the corners were not a print.
+        val strip = project(widthMm = 3000.0, heightMm = 100.0, tiltXDegrees = 25.0, tiltYDegrees = 15.0)
+        assertNull(PrintGeometry.aspectRatio(strip, IMAGE_WIDTH, IMAGE_HEIGHT))
+    }
+
+    @Test
+    fun outputSizeMatchesTheRecoveredRatioAtTheProjectedPixelCount() {
+        val (width, height) = PrintGeometry.outputSize(1600.0, 1000.0, 1.5)
+        assertEquals(1.5, width.toDouble() / height, 1e-3)
+        // Pixel count is held: correcting the shape must not invent detail.
+        assertEquals(1600.0 * 1000.0, width.toDouble() * height, 1600.0 * 1000.0 * 0.01)
+    }
+
+    @Test
+    fun outputSizeFallsBackToProjectedLengths() {
+        assertEquals(1600 to 1000, PrintGeometry.outputSize(1600.4, 1000.6, null))
+        assertEquals(1600 to 1000, PrintGeometry.outputSize(1600.0, 1000.0, Double.NaN))
+        assertEquals(1600 to 1000, PrintGeometry.outputSize(1600.0, 1000.0, 0.0))
+        assertEquals(1600 to 1000, PrintGeometry.outputSize(1600.0, 1000.0, -1.5))
+    }
+
+    @Test
+    fun outputSizeNeverReturnsAnEmptyImage() {
+        val (width, height) = PrintGeometry.outputSize(0.4, 0.4, 1.5)
+        assertTrue(width >= 1 && height >= 1)
+        val (degenerateWidth, degenerateHeight) = PrintGeometry.outputSize(0.0, 0.0, 1.5)
+        assertTrue(degenerateWidth >= 1 && degenerateHeight >= 1)
+    }
+
+    @Test
     fun rejectsMalformedInput() {
         val square = project(widthMm = 100.0, heightMm = 100.0, tiltXDegrees = 20.0, tiltYDegrees = 20.0)
         assertNull(PrintGeometry.aspectRatio(square.take(3), IMAGE_WIDTH, IMAGE_HEIGHT))

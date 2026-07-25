@@ -169,22 +169,32 @@ object PrintGeometry {
      * same total pixel count as the projected-edge estimate so no resolution
      * is invented; otherwise the projected edges are used directly.
      */
+    /**
+     * Output pixel dimensions for a rectification. With a recovered [ratio]
+     * the axes are redistributed to match it while holding the projected
+     * estimate's total pixel count, so correcting the shape never invents
+     * resolution. Without one, or if the arithmetic degenerates, the
+     * projected lengths are used as they were.
+     */
+    fun outputSize(projectedWidth: Double, projectedHeight: Double, ratio: Double?): Pair<Int, Int> {
+        val fallback = projectedWidth.toInt().coerceAtLeast(1) to projectedHeight.toInt().coerceAtLeast(1)
+        if (ratio == null || !ratio.isFinite() || ratio <= 0.0) return fallback
+        if (!(projectedWidth > 0) || !(projectedHeight > 0)) return fallback
+        val correctedHeight = kotlin.math.sqrt(projectedWidth * projectedHeight / ratio)
+        val correctedWidth = ratio * correctedHeight
+        if (!correctedWidth.isFinite() || !correctedHeight.isFinite()) return fallback
+        return correctedWidth.toInt().coerceAtLeast(1) to correctedHeight.toInt().coerceAtLeast(1)
+    }
+
     fun rectify(image: Mat, quad: Quad, interpolation: Int = Imgproc.INTER_CUBIC): Mat {
         val (topLeft, topRight, bottomRight, bottomLeft) = quad.points
         val projectedWidth = maxOf(distance(topLeft, topRight), distance(bottomLeft, bottomRight))
         val projectedHeight = maxOf(distance(topLeft, bottomLeft), distance(topRight, bottomRight))
-        val ratio = aspectRatio(quad.points, image.cols(), image.rows())
-        var width = projectedWidth.toInt().coerceAtLeast(1)
-        var height = projectedHeight.toInt().coerceAtLeast(1)
-        if (ratio != null && projectedWidth > 0 && projectedHeight > 0) {
-            val pixels = projectedWidth * projectedHeight
-            val correctedHeight = kotlin.math.sqrt(pixels / ratio)
-            val correctedWidth = ratio * correctedHeight
-            if (correctedWidth.isFinite() && correctedHeight.isFinite()) {
-                width = correctedWidth.toInt().coerceAtLeast(1)
-                height = correctedHeight.toInt().coerceAtLeast(1)
-            }
-        }
+        val (width, height) = outputSize(
+            projectedWidth,
+            projectedHeight,
+            aspectRatio(quad.points, image.cols(), image.rows()),
+        )
         val source = MatOfPoint2f(topLeft, topRight, bottomRight, bottomLeft)
         val destination = MatOfPoint2f(
             Point(0.0, 0.0),
