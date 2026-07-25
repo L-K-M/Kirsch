@@ -1,6 +1,7 @@
 package ch.lkmc.kirsch
 
 import android.app.Activity
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -62,7 +63,19 @@ object SystemBars {
      * goes into the layout margin instead.
      */
     fun offsetTopMargin(view: View) {
-        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+        if (params == null) {
+            // Silently doing nothing would leave the view under the status
+            // bar with no trace. Throwing would take the camera screen down
+            // over a layout-params mismatch, which is worse than a view that
+            // sits too high, so this is loud in logcat and harmless on screen.
+            Log.w(
+                "Kirsch",
+                "offsetTopMargin needs MarginLayoutParams, got " +
+                    "${view.layoutParams?.javaClass?.simpleName}; inset not applied",
+            )
+            return
+        }
         val startTop = params.topMargin
         view.setOnApplyWindowInsetsListener { target, insets ->
             val bars = insets.getInsets(
