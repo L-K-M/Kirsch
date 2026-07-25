@@ -89,10 +89,89 @@ object PrintGeometry {
         } / 2.0,
     )
 
+    /**
+     * Recovers the print's true width-to-height ratio from the projection of
+     * its four corners, assuming the print is a rectangle and the camera has
+     * square pixels with its principal point at the image centre.
+     *
+     * The projected edge lengths are not the physical ones: under perspective
+     * the far edge of a tilted print is shorter than the near edge, so sizing
+     * the rectified output by projected edges stretches every off-axis scan.
+     * This is the standard rectangle-from-quadrilateral construction (Zhang &
+     * He, *Whiteboard Scanning and Image Enhancement*, 2003): solve for the
+     * focal length that makes the two vanishing directions orthogonal, then
+     * measure the rectangle in that camera's frame.
+     *
+     * Returns null when the construction degenerates — a near-frontal view
+     * makes the quadrilateral nearly a parallelogram and both vanishing points
+     * run off to infinity, and a corner set that is not a projected rectangle
+     * gives a negative focal length. In both cases the projected edge lengths
+     * are already the best available estimate, so the caller falls back.
+     *
+     * [points] must be in the order this object produces: top-left,
+     * top-right, bottom-right, bottom-left.
+     */
+    fun aspectRatio(points: List<Point>, imageWidth: Int, imageHeight: Int): Double? {
+        if (points.size != 4 || imageWidth <= 0 || imageHeight <= 0) return null
+        if (points.any { !it.x.isFinite() || !it.y.isFinite() }) return null
+        // Zhang & He index the corners row-major: m1 m2 over m3 m4.
+        val m1 = homogeneous(points[0])
+        val m2 = homogeneous(points[1])
+        val m3 = homogeneous(points[3])
+        val m4 = homogeneous(points[2])
+        val k2Denominator = dot(cross(m2, m4), m3)
+        val k3Denominator = dot(cross(m3, m4), m2)
+        if (k2Denominator == 0.0 || k3Denominator == 0.0) return null
+        val k2 = dot(cross(m1, m4), m3) / k2Denominator
+        val k3 = dot(cross(m1, m4), m2) / k3Denominator
+        val n2 = scaleMinus(k2, m2, m1)
+        val n3 = scaleMinus(k3, m3, m1)
+        if (n2.any { !it.isFinite() } || n3.any { !it.isFinite() }) return null
+
+        val centerX = imageWidth / 2.0
+        val centerY = imageHeight / 2.0
+        // Both vanishing points at infinity means an affine (near-frontal)
+        // view: the projected edges already carry the true ratio.
+        val affine = kotlin.math.abs(n2[2]) < AFFINE_EPSILON && kotlin.math.abs(n3[2]) < AFFINE_EPSILON
+        if (affine) return null
+
+        val squaredFocal = -(
+            (n2[0] * n3[0] - (n2[0] * n3[2] + n2[2] * n3[0]) * centerX + n2[2] * n3[2] * centerX * centerX) +
+                (n2[1] * n3[1] - (n2[1] * n3[2] + n2[2] * n3[1]) * centerY + n2[2] * n3[2] * centerY * centerY)
+            ) / (n2[2] * n3[2])
+        if (!squaredFocal.isFinite() || squaredFocal <= 0.0) return null
+
+        val widthSquared = normalizedLengthSquared(n2, centerX, centerY, squaredFocal)
+        val heightSquared = normalizedLengthSquared(n3, centerX, centerY, squaredFocal)
+        if (heightSquared <= 0.0 || !widthSquared.isFinite() || !heightSquared.isFinite()) return null
+        val ratio = kotlin.math.sqrt(widthSquared / heightSquared)
+        // A recovered ratio far outside anything a print can be means the
+        // corners were not a projected rectangle.
+        return ratio.takeIf { it.isFinite() && it in MIN_PLAUSIBLE_RATIO..MAX_PLAUSIBLE_RATIO }
+    }
+
+    /**
+     * Rectifies [quad] out of [image]. The output is sized from the recovered
+     * physical aspect ratio when [aspectRatio] can supply one, keeping the
+     * same total pixel count as the projected-edge estimate so no resolution
+     * is invented; otherwise the projected edges are used directly.
+     */
     fun rectify(image: Mat, quad: Quad, interpolation: Int = Imgproc.INTER_CUBIC): Mat {
         val (topLeft, topRight, bottomRight, bottomLeft) = quad.points
-        val width = maxOf(distance(topLeft, topRight), distance(bottomLeft, bottomRight)).toInt().coerceAtLeast(1)
-        val height = maxOf(distance(topLeft, bottomLeft), distance(topRight, bottomRight)).toInt().coerceAtLeast(1)
+        val projectedWidth = maxOf(distance(topLeft, topRight), distance(bottomLeft, bottomRight))
+        val projectedHeight = maxOf(distance(topLeft, bottomLeft), distance(topRight, bottomRight))
+        val ratio = aspectRatio(quad.points, image.cols(), image.rows())
+        var width = projectedWidth.toInt().coerceAtLeast(1)
+        var height = projectedHeight.toInt().coerceAtLeast(1)
+        if (ratio != null && projectedWidth > 0 && projectedHeight > 0) {
+            val pixels = projectedWidth * projectedHeight
+            val correctedHeight = kotlin.math.sqrt(pixels / ratio)
+            val correctedWidth = ratio * correctedHeight
+            if (correctedWidth.isFinite() && correctedHeight.isFinite()) {
+                width = correctedWidth.toInt().coerceAtLeast(1)
+                height = correctedHeight.toInt().coerceAtLeast(1)
+            }
+        }
         val source = MatOfPoint2f(topLeft, topRight, bottomRight, bottomLeft)
         val destination = MatOfPoint2f(
             Point(0.0, 0.0),
@@ -120,4 +199,38 @@ object PrintGeometry {
     }
 
     private fun distance(first: Point, second: Point): Double = hypot(first.x - second.x, first.y - second.y)
+
+    private const val AFFINE_EPSILON = 1e-9
+
+    /** 20:1 covers every print, panorama, and album strip a user could scan. */
+    private const val MIN_PLAUSIBLE_RATIO = 0.05
+    private const val MAX_PLAUSIBLE_RATIO = 20.0
+
+    private fun homogeneous(point: Point): DoubleArray = doubleArrayOf(point.x, point.y, 1.0)
+
+    private fun cross(a: DoubleArray, b: DoubleArray): DoubleArray = doubleArrayOf(
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+    private fun dot(a: DoubleArray, b: DoubleArray): Double = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    private fun scaleMinus(scale: Double, a: DoubleArray, b: DoubleArray): DoubleArray =
+        doubleArrayOf(scale * a[0] - b[0], scale * a[1] - b[1], scale * a[2] - b[2])
+
+    /**
+     * |A⁻¹n|² for the intrinsic matrix A = [[f,0,u0],[0,f,v0],[0,0,1]] — the
+     * squared length of an edge direction measured in the camera frame.
+     */
+    private fun normalizedLengthSquared(
+        n: DoubleArray,
+        centerX: Double,
+        centerY: Double,
+        squaredFocal: Double,
+    ): Double {
+        val x = n[0] - centerX * n[2]
+        val y = n[1] - centerY * n[2]
+        return (x * x + y * y) / squaredFocal + n[2] * n[2]
+    }
 }
