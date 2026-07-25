@@ -72,6 +72,10 @@ object SystemBars {
      * Same, for a view whose own padding is part of its appearance — a pill
      * background would deform if the inset were added to it — so the offset
      * goes into the layout margin instead.
+     *
+     * The call-once and no-nesting caveats on [pad] apply here for the same
+     * reasons: the margin at call time is the baseline, and insets are passed
+     * on unconsumed.
      */
     fun offsetTopMargin(view: View) {
         val params = view.layoutParams as? ViewGroup.MarginLayoutParams
