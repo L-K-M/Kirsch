@@ -3,6 +3,13 @@ package ch.lkmc.kirsch.archival
 enum class ScaleAuthority(val manifestValue: String) {
     CONFIRMED_DIMENSIONS("confirmed-dimensions"),
     COPLANAR_TARGET("coplanar-target"),
+    ;
+
+    companion object {
+        /** Null for an absent or unrecognized record, so callers can fail closed. */
+        fun fromManifestValue(value: String?): ScaleAuthority? =
+            entries.firstOrNull { it.manifestValue == value }
+    }
 }
 
 data class ScaleMeasurement(

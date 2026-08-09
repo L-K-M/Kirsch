@@ -48,6 +48,7 @@
       ],
       "properties": {
         "recorded_utc": { "type": "string", "format": "date-time" },
+        "rescaled_utc": { "type": "string", "format": "date-time" },
         "authority": { "enum": ["confirmed-dimensions", "coplanar-target"] },
         "target_id": { "type": "string", "minLength": 1 },
         "physical_width_mm": { "type": "number", "exclusiveMinimum": 0 },

@@ -53,7 +53,11 @@
     <string name="apply_manual_corners">APPLY CORNERS</string>
     <string name="applying_manual_corners">Applying corner correction…</string>
     <string name="review_enhance_section">ENHANCE (OPTIONAL)</string>
-    <string name="review_enhance_caption">Each enhancement is saved as a new copy — the original scan is always kept.</string>
+    <string name="review_enhance_caption">Each enhancement is saved as a new copy and becomes the scan you save. The original is always kept and you can go back to it.</string>
+    <string name="revert_to_unrestored">USE ORIGINAL SCAN</string>
+    <string name="reverting_to_unrestored">Going back to the original scan…</string>
+    <string name="active_output_master">Saving: the original scan</string>
+    <string name="active_output_restored">Saving: the %1$s copy</string>
     <string name="review_finish_section">FINISH</string>
     <string name="accept_scan">SAVE TO PHOTOS</string>
     <string name="review_save_caption">Adds the finished scan to your photo library (Pictures/Kirsch) and locks this version. Sources stay on the device for reprocessing.</string>

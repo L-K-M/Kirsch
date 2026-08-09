@@ -41,7 +41,9 @@ The review screen provides draggable print corners (with a magnifier loupe while
 - fade correction
 - classical 2× upscaling
 
-Restorations never overwrite the acquisition-derived master. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
+Restorations never overwrite the acquisition-derived master: each is written as a new file and appended to the derivative graph. Creating one does make it the scan's *active* output, so review and **Save to Photos** show what was asked for; **Use original scan** returns the active output to the newest unrestored copy without deleting anything. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
+
+Recorded physical scale survives edits that change pixel dimensions: the print's confirmed size does not change when the active output does, so sampling frequency is re-derived from the new dimensions rather than dropped.
 
 **Save to Photos** finishes a scan: the current output JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore (no extra permission required for app-created media), the scan is accepted and locked, and the export is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
 
