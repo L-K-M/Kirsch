@@ -6,8 +6,19 @@
         <item name="android:colorPrimary">#151412</item>
         <item name="android:colorPrimaryDark">#0E0D0B</item>
         <item name="android:windowBackground">#0E0D0B</item>
-        <item name="android:navigationBarColor">#0E0D0B</item>
-        <item name="android:statusBarColor">#0E0D0B</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!--
+            Every screen is drawn edge to edge (see SystemBars) and pads itself
+            for the system-bar and cutout insets, so the bars stay transparent
+            and the platform must not paint a contrast scrim behind them.
+            Android 15 ignores these colours for a targetSdk-35 app; the
+            declarations keep Android 12-14 looking the same.
+        -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <!-- The camera preview wants the full panel; the chrome insets itself. -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 </resources>

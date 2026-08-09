@@ -36,6 +36,7 @@ class ReviewActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SystemBars.optIn(this)
         manifestFile = File(requireNotNull(intent.getStringExtra(EXTRA_MANIFEST)))
         buildUi()
         loadScan()
@@ -177,6 +178,10 @@ class ReviewActivity : Activity() {
                 )
             },
         )
+        // The content scrolls, so the insets belong to it rather than to the
+        // ScrollView: the last control clears the gesture bar instead of
+        // sitting under it, and the title clears the status bar.
+        SystemBars.pad(content, left = true, top = true, right = true, bottom = true, includeIme = true)
     }
 
     private fun runTask(message: String, operation: () -> File) {
