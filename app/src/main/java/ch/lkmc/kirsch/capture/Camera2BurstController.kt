@@ -150,6 +150,7 @@ class Camera2BurstController(
     private var sweepSession: SweepSession? = null
     private var sweepFrameIndex = 0
     private var sweepTargetCount = -1
+    private var sweepDroppedFrames = 0
     private var finishRequested = false
     private var finishSuccess = true
     private var closed = false
@@ -664,6 +665,7 @@ class Camera2BurstController(
     ) {
         sweepFrameIndex = 0
         sweepTargetCount = -1
+        sweepDroppedFrames = 0
         val analyzer = SweepFrameAnalyzer()
         val sweep = SweepSession(
             plan.generation,
@@ -688,7 +690,15 @@ class Camera2BurstController(
                 )
                 dispatchFrameWrite(writer, image, indexed)
             },
-            onDropImage = Image::close,
+            onDropImage = { image ->
+                image.close()
+                // A kept frame evicted before its CaptureResult arrived is a
+                // view the sweep will never persist. Left silent it would
+                // strand the target count above what can ever be written and
+                // fail the whole capture; the shortfall is recorded and the
+                // target follows it down.
+                cameraHandler.post { noteSweepImageDropped(writer, sweep) }
+            },
         )
         try {
             session.stopRepeating()
@@ -809,6 +819,33 @@ class Camera2BurstController(
         }
     }
 
+    /**
+     * A kept sweep image was evicted from the pairer before its
+     * CaptureResult arrived, so it can never be written. The sweep's target
+     * follows the loss down instead of waiting for a frame that is not
+     * coming: a slow-IO device then degrades to a shorter stack with a
+     * recorded warning rather than discarding the user's whole sweep.
+     */
+    private fun noteSweepImageDropped(writer: CapturePackageWriter, sweep: SweepSession) {
+        if (activeWriter !== writer || sweepSession !== sweep) return
+        sweepDroppedFrames += 1
+        writer.addWarning(
+            "A kept sweep view was dropped before persistence; the stack is one view " +
+                "shorter and glare rejection has that much less to work with",
+        )
+        if (sweepTargetCount <= 0) return
+        sweepTargetCount -= 1
+        if (sweepTargetCount == 0) {
+            writer.addError("Every kept sweep view was dropped before persistence")
+            requestFinish(success = false)
+            return
+        }
+        writer.setRequestedFrameCount(sweepTargetCount)
+        if (writer.persistedFrameCount() >= sweepTargetCount && activeWrites == 0) {
+            requestFinish(success = finishSuccess)
+        }
+    }
+
     private fun finishSweep(sweep: SweepSession, keptCount: Int, endedEarly: Boolean) {
         if (sweepSession !== sweep || generation != sweep.generation) return
         val writer = activeWriter ?: return
@@ -824,15 +861,24 @@ class Camera2BurstController(
                     "coverage; expect residual glare where no view was unsaturated",
             )
         }
-        if (keptCount == 0) {
-            writer.addError("Sweep kept no frames")
+        // Drops recorded before the sweep stopped were counted while the
+        // target was still unknown; they come off it here.
+        val deliverable = keptCount - sweepDroppedFrames
+        if (deliverable <= 0) {
+            writer.addError(
+                if (keptCount == 0) {
+                    "Sweep kept no frames"
+                } else {
+                    "Every kept sweep view was dropped before persistence"
+                },
+            )
             requestFinish(success = false)
             return
         }
-        writer.setRequestedFrameCount(keptCount)
-        sweepTargetCount = keptCount
-        status("Saving $keptCount sweep frames")
-        if (writer.persistedFrameCount() == keptCount && activeWrites == 0) {
+        writer.setRequestedFrameCount(deliverable)
+        sweepTargetCount = deliverable
+        status("Saving $deliverable sweep frames")
+        if (writer.persistedFrameCount() >= deliverable && activeWrites == 0) {
             requestFinish(success = finishSuccess)
         }
     }
@@ -1027,7 +1073,11 @@ class Camera2BurstController(
                 if (!success) finishSuccess = false
                 if (activeWrites == 0) closeRetiredReaders()
                 val targetCount = if (requestedProfile.sweep) sweepTargetCount else requestedProfile.frameCount
-                if (targetCount > 0 && count == targetCount) requestFinish(success = finishSuccess)
+                // A sweep's target can fall while a write is in flight (a
+                // kept view was dropped), so the count can overshoot it by
+                // the time this runs; >= keeps that from waiting out the
+                // watchdog. A fixed burst's target never moves.
+                if (targetCount > 0 && count >= targetCount) requestFinish(success = finishSuccess)
                 else if (finishRequested && activeWrites == 0) finalizeActiveWriter()
             }
         }
