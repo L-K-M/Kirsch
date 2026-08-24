@@ -1,5 +1,8 @@
 package ch.lkmc.kirsch.derivative
 
+import android.graphics.BitmapFactory
+import ch.lkmc.kirsch.archival.ScaleAuthority
+import ch.lkmc.kirsch.archival.ScaleMeasurement
 import ch.lkmc.kirsch.geometry.PrintGeometry
 import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
@@ -46,6 +49,12 @@ object DerivativeStore {
                     "Active preview changed while processing"
                 }
                 appendDerivative(current, root, file, "restored", recipe.id, parent)
+                // The restoration the user asked for becomes the scan's active
+                // output, so review and the photo-library export show it. The
+                // acquisition-derived master stays on disk and in the graph,
+                // and revertToUnrestored() returns to it.
+                current.put("preview_path", file.relativeTo(root).invariantSeparatorsPath)
+                rescaleArchivalScale(current, file)
                 ScanManifestStore.write(scanManifest, current)
                 Created(file, scanManifest)
             }
@@ -53,6 +62,81 @@ object DerivativeStore {
             file.delete()
             throw error
         }
+    }
+
+    /**
+     * Returns the active output to the newest image derivative that is not a
+     * restoration — the manually rectified master if the corners were
+     * corrected, otherwise the acquisition master. Restored copies stay on
+     * disk and in the derivative graph; only which one the scan currently
+     * presents changes.
+     */
+    fun revertToUnrestored(scanManifest: File): Created = ScanManifestStore.locked {
+        val manifest = JSONObject(scanManifest.readText())
+        require(manifest.getString("state") == "review") {
+            "Accepted scans are immutable; start a new revision to edit"
+        }
+        val root = requireNotNull(scanManifest.parentFile)
+        val derivatives = manifest.getJSONArray("derivatives")
+        var target: String? = null
+        for (index in 0 until derivatives.length()) {
+            val entry = derivatives.getJSONObject(index)
+            if (entry.optString("kind") == "restored") continue
+            val path = entry.optString("path")
+            // The graph also holds the TIFF container and the confidence and
+            // failure maps; only a JPEG can be the presented output. Records
+            // written by ScanProcessor carry media_type, records appended here
+            // do not, so both signals are accepted.
+            if (entry.optString("media_type") != "image/jpeg" && !path.endsWith(".jpg")) continue
+            target = path
+        }
+        val path = requireNotNull(target) { "This scan has no unrestored copy to return to" }
+        val file = File(root, path)
+        require(file.isFile) { "The unrestored copy is missing from storage" }
+        manifest.put("preview_path", path)
+        rescaleArchivalScale(manifest, file)
+        ScanManifestStore.write(scanManifest, manifest)
+        Created(file, scanManifest)
+    }
+
+    /**
+     * Physical print size does not change when the active output does, but
+     * pixel dimensions can — a manual rectification reshapes the print and a
+     * classical upscale doubles it. Sampling frequency is re-derived from the
+     * recorded physical size rather than dropped, so a measurement the user
+     * took once survives every later edit. It is dropped only when the record
+     * is not usable.
+     */
+    private fun rescaleArchivalScale(manifest: JSONObject, preview: File) {
+        val scale = manifest.optJSONObject("archival_scale") ?: return
+        val authority = ScaleAuthority.fromManifestValue(scale.optString("authority"))
+        val widthMm = scale.optDouble("physical_width_mm", Double.NaN)
+        val heightMm = scale.optDouble("physical_height_mm", Double.NaN)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(preview.absolutePath, bounds)
+        val measurement = if (authority == null) {
+            null
+        } else {
+            runCatching {
+                ScaleMeasurement(
+                    pixelWidth = bounds.outWidth,
+                    pixelHeight = bounds.outHeight,
+                    physicalWidthMm = widthMm,
+                    physicalHeightMm = heightMm,
+                    authority = authority,
+                    targetId = scale.optString("target_id").takeIf(String::isNotBlank),
+                )
+            }.getOrNull()
+        }
+        if (measurement == null) {
+            manifest.remove("archival_scale")
+            return
+        }
+        scale.put("pixel_width", measurement.pixelWidth)
+            .put("pixel_height", measurement.pixelHeight)
+            .put("sampling_frequency_ppi_x", measurement.ppiX)
+            .put("sampling_frequency_ppi_y", measurement.ppiY)
+            .put("rescaled_utc", Instant.now().toString())
     }
 
     fun createManualRectification(scanManifest: File, normalizedPoints: List<Point>): Created {
@@ -104,7 +188,7 @@ object DerivativeStore {
                     "normalized_points",
                     org.json.JSONArray(validatedPoints.map { org.json.JSONArray(listOf(it.x, it.y)) }),
                 ))
-                current.remove("archival_scale")
+                rescaleArchivalScale(current, file)
                 ScanManifestStore.write(scanManifest, current)
                 Created(file, scanManifest)
             }
