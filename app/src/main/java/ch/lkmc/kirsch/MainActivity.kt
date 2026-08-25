@@ -58,6 +58,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        SystemBars.optIn(this)
         buildUi()
         controller = Camera2BurstController(this, textureView, this)
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -373,6 +374,12 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             },
         )
         setContentView(root)
+
+        // The preview fills the window; only the chrome drawn over it moves
+        // out from under the status bar, the cutout, and the gesture bar.
+        SystemBars.pad(title, left = true, top = true)
+        SystemBars.offsetTopMargin(statusChip)
+        SystemBars.pad(controls, left = true, right = true, bottom = true)
     }
 
     private fun pillButton(label: String): TextView = TextView(this).apply {
