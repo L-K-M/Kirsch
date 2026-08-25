@@ -15,7 +15,9 @@ The ring is driven only by measured camera motion (subsampled phase correlation 
 - **RAW acquisition only** records a nine-frame DNG package when supported and falls back to YUV otherwise. RAW packages are retained but are not converted into product derivatives because Phase 0 did not verify a DNG demosaic, black-level, or color pipeline.
 - **Quick single frame** records one YUV frame and uses the same review/export path without claiming glare reduction.
 
-The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. Sweep packages record the kept-frame count as `requested_frame_count`, fixed at the moment the sweep stops.
+The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. Sweep packages record the deliverable frame count as `requested_frame_count`, fixed at the moment the sweep stops.
+
+If a kept view is evicted before its `CaptureResult` arrives — the reader holds only six full-resolution buffers, so a slow write path can exhaust them — the loss is recorded as a warning and the deliverable count follows it down. A sweep degrades to a shorter stack rather than failing the whole capture, and the shortfall is visible in the manifest as the gap between `extensions.warnings` and the kept count.
 
 ## Processing
 
