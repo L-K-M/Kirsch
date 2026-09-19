@@ -64,6 +64,7 @@
     <string name="saving_scan">Saving to your photo library…</string>
     <string name="save_version_title">Save which version?</string>
     <string name="save_version_master">Scan (master)</string>
+    <string name="save_version_rectified">Scan (corner-corrected)</string>
     <string name="save_version_restored">Restored copy: %1$s</string>
     <string name="save_version_confirm">Save</string>
     <string name="scan_accepted">Saved to your photo library (Pictures/Kirsch). This scan is now locked; its sources remain on the device.</string>

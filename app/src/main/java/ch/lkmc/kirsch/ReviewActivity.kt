@@ -299,20 +299,23 @@ class ReviewActivity : Activity() {
     private class ExportChoice(val label: String, val relativePath: String)
 
     /**
-     * Restored derivatives are separate copies that never replace the
-     * master, so finishing a scan asks which version goes to the photo
-     * library when restored copies exist. Without the chooser, an
-     * enhancement the user just created would be silently ignored by the
-     * export.
+     * Finishing a scan exports the active output by default, but every
+     * version on disk stays eligible: the chooser lists each exportable copy
+     * with the active output preselected, so saving an older restoration or
+     * the unrestored master takes one tap instead of a revert cycle.
      */
     private fun saveScan() {
         Thread({
-            val choices = runCatching(::exportChoices)
+            val options = runCatching(::exportChoices)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                choices.fold(
-                    onSuccess = { list ->
-                        if (list.size <= 1) performSave(list.first()) else showSaveChooser(list)
+                options.fold(
+                    onSuccess = { export ->
+                        if (export.choices.size <= 1) {
+                            performSave(export.choices.first())
+                        } else {
+                            showSaveChooser(export)
+                        }
                     },
                     onFailure = {
                         status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
@@ -322,35 +325,57 @@ class ReviewActivity : Activity() {
         }, "kirsch-save-choices").start()
     }
 
-    private fun exportChoices(): List<ExportChoice> {
+    private class ExportOptions(val choices: List<ExportChoice>, val activeIndex: Int)
+
+    private fun exportChoices(): ExportOptions {
         val manifest = ScanManifestStore.locked { JSONObject(manifestFile.readText()) }
-        val choices = mutableListOf(
-            ExportChoice(getString(R.string.save_version_master), manifest.getString("preview_path")),
-        )
+        val active = manifest.getString("preview_path")
+        val choices = mutableListOf<ExportChoice>()
+        var activeIndex = -1
+        // Every JPEG in the derivative graph is exportable: the acquisition
+        // master, corner-corrected copies, and each restoration. Maps and the
+        // TIFF container are not photo-library material. Records written by
+        // ScanProcessor carry media_type, records appended by DerivativeStore
+        // do not, so both signals are accepted.
         val derivatives = manifest.optJSONArray("derivatives")
         if (derivatives != null) {
             for (index in 0 until derivatives.length()) {
                 val record = derivatives.getJSONObject(index)
-                if (record.optString("kind") != "restored") continue
-                val recipe = record.optString("recipe")
-                val label = RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
-                choices += ExportChoice(
-                    getString(R.string.save_version_restored, label),
-                    record.getString("path"),
-                )
+                val path = record.optString("path")
+                if (record.optString("media_type") != "image/jpeg" && !path.endsWith(".jpg")) continue
+                val label = when (record.optString("kind")) {
+                    "restored" -> {
+                        val recipe = record.optString("recipe")
+                        val name = RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
+                        getString(R.string.save_version_restored, name)
+                    }
+                    "acquisition-derived" -> getString(R.string.save_version_rectified)
+                    else -> getString(R.string.save_version_master)
+                }
+                if (path == active) activeIndex = choices.size
+                choices += ExportChoice(label, path)
             }
         }
-        return choices
+        // preview_path always points at a derivative record; if a manifest
+        // somehow lacks one, still offer the active output itself.
+        if (activeIndex < 0) {
+            choices.add(0, ExportChoice(getString(R.string.save_version_master), active))
+            activeIndex = 0
+        }
+        return ExportOptions(choices, activeIndex)
     }
 
-    private fun showSaveChooser(choices: List<ExportChoice>) {
-        var selected = 0
+    private fun showSaveChooser(options: ExportOptions) {
+        var selected = options.activeIndex
         AlertDialog.Builder(this)
             .setTitle(R.string.save_version_title)
-            .setSingleChoiceItems(choices.map(ExportChoice::label).toTypedArray(), 0) { _, index ->
+            .setSingleChoiceItems(
+                options.choices.map(ExportChoice::label).toTypedArray(),
+                options.activeIndex,
+            ) { _, index ->
                 selected = index
             }
-            .setPositiveButton(R.string.save_version_confirm) { _, _ -> performSave(choices[selected]) }
+            .setPositiveButton(R.string.save_version_confirm) { _, _ -> performSave(options.choices[selected]) }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
