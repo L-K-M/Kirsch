@@ -63,6 +63,7 @@ class ScanProcessor(private val context: Context) {
                     registration.aligned,
                     registration.validMasks,
                     registration.referenceIndex,
+                    registration.acceptedFrameCount,
                 )
                 registration.aligned.forEach(Mat::release)
                 registration.validMasks.forEach(Mat::release)
