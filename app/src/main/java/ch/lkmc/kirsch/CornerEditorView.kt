@@ -22,17 +22,34 @@ class CornerEditorView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = resources.displayMetrics.density * 3
     }
+    // Contrast against arbitrary photo content comes from a dark halo drawn
+    // under each white mark instead of Paint.setShadowLayer: shadow layers on
+    // shapes force the whole view into a software layer, which would make
+    // every drag frame rasterize the full bitmap on the UI thread.
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.FILL
-        setShadowLayer(resources.displayMetrics.density * 3, 0f, 0f, Color.BLACK)
+    }
+    private val handleHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xB3000000.toInt()
+        style = Paint.Style.FILL
     }
     private val reticlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = resources.displayMetrics.density * 1.5f
-        setShadowLayer(resources.displayMetrics.density * 2, 0f, 0f, Color.BLACK)
     }
+    private val reticleHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xB3000000.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = resources.displayMetrics.density * 3.5f
+    }
+    // A solid ring reads heavier than the soft 3dp shadow blur it replaces;
+    // 2dp keeps comparable contrast against busy content without bulk.
+    private val handleHaloWidth = resources.displayMetrics.density * 2f
+    // Allocated once: onDraw runs on every drag frame.
+    private val reticlePaints = arrayOf(reticleHaloPaint, reticlePaint)
+    private val reticleDirections = arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)
     private var bitmap: Bitmap? = null
     private val destination = RectF()
     private var activeCorner = -1
@@ -47,7 +64,6 @@ class CornerEditorView(context: Context) : View(context) {
     )
 
     init {
-        setLayerType(LAYER_TYPE_SOFTWARE, null)
         contentDescription = context.getString(R.string.corner_editor_description)
         minimumHeight = (280 * resources.displayMetrics.density).toInt()
     }
@@ -102,17 +118,20 @@ class CornerEditorView(context: Context) : View(context) {
                 // While dragging, the pixels at the corner must stay visible
                 // both on screen and inside the Magnifier (which snapshots
                 // this view's rendering): draw an open reticle, not a disc.
-                canvas.drawCircle(point.first, point.second, radius, reticlePaint)
-                for ((dx, dy) in arrayOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)) {
-                    canvas.drawLine(
-                        point.first + dx * radius * 0.45f,
-                        point.second + dy * radius * 0.45f,
-                        point.first + dx * radius * 0.95f,
-                        point.second + dy * radius * 0.95f,
-                        reticlePaint,
-                    )
+                for (paint in reticlePaints) {
+                    canvas.drawCircle(point.first, point.second, radius, paint)
+                    for ((dx, dy) in reticleDirections) {
+                        canvas.drawLine(
+                            point.first + dx * radius * 0.45f,
+                            point.second + dy * radius * 0.45f,
+                            point.first + dx * radius * 0.95f,
+                            point.second + dy * radius * 0.95f,
+                            paint,
+                        )
+                    }
                 }
             } else {
+                canvas.drawCircle(point.first, point.second, radius + handleHaloWidth, handleHaloPaint)
                 canvas.drawCircle(point.first, point.second, radius, handlePaint)
             }
         }

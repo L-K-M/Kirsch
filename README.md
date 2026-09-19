@@ -4,6 +4,9 @@
 
 Kirsch produces glare-reduced digital copies of printed photographs on Android. The repository contains the Phase 0 evidence tooling and the evidence-supported Phase 1–3 product paths from [`PLAN.md`](PLAN.md):
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 - a versioned physical-print benchmark protocol and standard-library validator
 - capability-driven Camera2 RAW acquisition, YUV quality sweep, and single-frame capture
 - on-device ORB/MAGSAC++ registration, exposure normalization, conservative temporal fusion, and confidence/failure maps
@@ -27,6 +30,6 @@ Build the Android app after installing JDK 17 and Android SDK 35:
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-See [`app/README.md`](app/README.md) for capture, processing, review, and export behavior. [`PHASES1-3.md`](PHASES1-3.md) maps the implementation to the roadmap and records evidence-driven boundaries.
+See [`app/README.md`](app/README.md) for capture, processing, review, and export behavior. [`PHASES1-3.md`](PHASES1-3.md) maps the implementation to the roadmap and records evidence-driven boundaries. [`ANALYSIS.md`](ANALYSIS.md) is the living backlog: what a full review of the scanner found, what has since landed, and what is open.
 
 [`PHASE0.md`](PHASE0.md) remains the immutable evidence record. A successful build is not represented as new physical, legal, usability, or image-quality evidence.

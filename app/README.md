@@ -15,7 +15,9 @@ The ring is driven only by measured camera motion (subsampled phase correlation 
 - **RAW acquisition only** records a nine-frame DNG package when supported and falls back to YUV otherwise. RAW packages are retained but are not converted into product derivatives because Phase 0 did not verify a DNG demosaic, black-level, or color pipeline.
 - **Quick single frame** records one YUV frame and uses the same review/export path without claiming glare reduction.
 
-The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. Sweep packages record the kept-frame count as `requested_frame_count`, fixed at the moment the sweep stops.
+The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. Sweep packages record the deliverable frame count as `requested_frame_count`, fixed at the moment the sweep stops.
+
+If a kept view is evicted before its `CaptureResult` arrives — the reader holds only six full-resolution buffers, so a slow write path can exhaust them — the loss is recorded as a warning and the deliverable count follows it down. A sweep degrades to a shorter stack rather than failing the whole capture, and the shortfall is visible in the manifest as the gap between `extensions.warnings` and the kept count.
 
 ## Processing
 
@@ -26,7 +28,8 @@ Accepted YUV acquisitions enter a process-death-recoverable single-worker queue.
 3. normalizes by exposure-time × sensitivity where metadata permits
 4. registers frames to the middle observation with ORB and MAGSAC++ homographies
 5. rejects weak registration and falls back visibly to the best single frame
-6. applies conservative glare-aware temporal selection and emits confidence/failure maps
+6. applies conservative glare-aware temporal selection, averages the views that
+   agree with the selected one, and emits confidence/failure maps
 7. detects print quadrilaterals, rectifies the largest candidate, and always permits manual correction
 8. writes a high-quality JPEG and a 16-bit TIFF container
 
@@ -41,9 +44,11 @@ The review screen provides draggable print corners (with a magnifier loupe while
 - fade correction
 - classical 2× upscaling
 
-Restorations never overwrite the acquisition-derived master. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
+Restorations never overwrite the acquisition-derived master: each is written as a new file and appended to the derivative graph. Creating one does make it the scan's *active* output, so review and **Save to Photos** show what was asked for; **Use original scan** returns the active output to the newest unrestored copy without deleting anything. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
 
-**Save to Photos** finishes a scan: the current output JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore (no extra permission required for app-created media), the scan is accepted and locked, and the export is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
+Recorded physical scale survives edits that change pixel dimensions: the print's confirmed size does not change when the active output does, so sampling frequency is re-derived from the new dimensions rather than dropped.
+
+**Save to Photos** finishes a scan: when more than one exportable version exists it asks which to save (the active output is preselected), the chosen JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore with a dated display name and EXIF capture metadata (no extra permission required for app-created media), the scan is accepted and locked, and the export with its source path is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
 
 Sampling frequency is labeled PPI only after confirmed dimensions or a traceable coplanar target are recorded. This does not claim delivered SFR resolution.
 
