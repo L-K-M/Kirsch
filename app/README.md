@@ -48,7 +48,7 @@ Restorations never overwrite the acquisition-derived master: each is written as 
 
 Recorded physical scale survives edits that change pixel dimensions: the print's confirmed size does not change when the active output does, so sampling frequency is re-derived from the new dimensions rather than dropped.
 
-**Save to Photos** finishes a scan: the current output JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore (no extra permission required for app-created media), the scan is accepted and locked, and the export is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
+**Save to Photos** finishes a scan: when more than one exportable version exists it asks which to save (the active output is preselected), the chosen JPEG is inserted into the device photo library under `Pictures/Kirsch` via MediaStore with a dated display name and EXIF capture metadata (no extra permission required for app-created media), the scan is accepted and locked, and the export with its source path is recorded in the scan manifest's `extensions`. The full-fidelity TIFF and all sources stay in app storage.
 
 Sampling frequency is labeled PPI only after confirmed dimensions or a traceable coplanar target are recorded. This does not claim delivered SFR resolution.
 
