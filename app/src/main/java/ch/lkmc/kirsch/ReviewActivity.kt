@@ -33,6 +33,8 @@ class ReviewActivity : Activity() {
     private lateinit var manifestFile: File
     private lateinit var cornerEditor: CornerEditorView
     private lateinit var status: TextView
+    private lateinit var activeOutput: TextView
+    private lateinit var revertButton: Button
     private val editingControls = mutableListOf<View>()
     private var loadGeneration = 0
 
@@ -48,6 +50,7 @@ class ReviewActivity : Activity() {
         val points: List<Point>,
         val statusText: String,
         val editable: Boolean,
+        val restoredLabel: String?,
     )
 
     /**
@@ -76,6 +79,15 @@ class ReviewActivity : Activity() {
                         status.text = statusOverride ?: scan.statusText
                         cornerEditor.isEnabled = scan.editable
                         editingControls.forEach { it.isEnabled = scan.editable }
+                        // What "SAVE TO PHOTOS" will actually export.
+                        // Enhancements replace the active output, so the user
+                        // needs to see which one is live.
+                        activeOutput.text = if (scan.restoredLabel == null) {
+                            getString(R.string.active_output_master)
+                        } else {
+                            getString(R.string.active_output_restored, scan.restoredLabel)
+                        }
+                        revertButton.isEnabled = scan.editable && scan.restoredLabel != null
                     },
                     onFailure = {
                         // A task that already succeeded keeps its message
@@ -124,7 +136,27 @@ class ReviewActivity : Activity() {
                 },
             )
         }
-        return LoadedScan(bitmap, points, statusText, manifest.optString("state") == "review")
+        return LoadedScan(
+            bitmap,
+            points,
+            statusText,
+            manifest.optString("state") == "review",
+            activeRecipe(manifest),
+        )
+    }
+
+    /** The recipe label of the active output, or null when it is unrestored. */
+    private fun activeRecipe(manifest: JSONObject): String? {
+        val preview = manifest.optString("preview_path")
+        val derivatives = manifest.optJSONArray("derivatives") ?: return null
+        for (index in derivatives.length() - 1 downTo 0) {
+            val entry = derivatives.optJSONObject(index) ?: continue
+            if (entry.optString("path") != preview) continue
+            if (entry.optString("kind") != "restored") return null
+            val recipe = entry.optString("recipe")
+            return RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
+        }
+        return null
     }
 
     private fun buildUi() {
@@ -190,8 +222,25 @@ class ReviewActivity : Activity() {
             }
             content.addView(row)
         }
+        revertButton = Button(this).apply {
+            setText(R.string.revert_to_unrestored)
+            setOnClickListener {
+                runTask(getString(R.string.reverting_to_unrestored)) {
+                    DerivativeStore.revertToUnrestored(manifestFile).file
+                }
+            }
+            editingControls += this
+        }
+        content.addView(revertButton)
 
         content.addView(sectionHeader(R.string.review_finish_section))
+        activeOutput = TextView(this).apply {
+            setTextColor(0xFFFFB84D.toInt())
+            textSize = 13f
+            setPadding(0, 0, 0, dp(6))
+            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        content.addView(activeOutput)
         content.addView(
             Button(this).apply {
                 setText(R.string.accept_scan)
