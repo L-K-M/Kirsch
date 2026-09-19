@@ -48,6 +48,7 @@ class SettingsActivity : Activity() {
         pendingExport = savedInstanceState?.getStringArrayList(STATE_PENDING_EXPORT)
             ?.map(::File)
             ?: emptyList()
+        SystemBars.optIn(this)
         buildUi()
     }
 
@@ -318,6 +319,8 @@ class SettingsActivity : Activity() {
                 )
             },
         )
+        // includeIme keeps the benchmark print-ID field above the keyboard.
+        SystemBars.pad(content, left = true, top = true, right = true, bottom = true, includeIme = true)
     }
 
     private fun sectionHeader(resId: Int): TextView = TextView(this).apply {
