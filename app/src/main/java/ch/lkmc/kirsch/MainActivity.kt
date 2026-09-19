@@ -7,11 +7,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.view.Gravity
+import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
@@ -232,25 +234,44 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
     }
 
     /**
-     * The activity is locked to portrait and the HAL pre-rotates preview
-     * buffers for TextureView, so only the aspect ratio needs correcting:
+     * The HAL pre-rotates preview buffers for the natural (portrait) display
+     * orientation, so at ROTATION_0 only the aspect ratio needs correcting:
      * scale the stretched content back to its true aspect and center-crop.
+     *
+     * The manifest locks the activity to portrait, but Android ignores that
+     * lock in multi-window/split-screen mode and on many large screens, so
+     * the window can be at any rotation. For rotated windows this applies
+     * the standard Camera2 TextureView transform: restore the buffer's true
+     * aspect, center-crop to fill, and counter-rotate the content.
      */
     private fun configureTransform() {
         if (previewWidth == 0 || previewHeight == 0) return
         val viewWidth = textureView.width.toFloat()
         val viewHeight = textureView.height.toFloat()
         if (viewWidth == 0f || viewHeight == 0f) return
-        val contentWidth = minOf(previewWidth, previewHeight).toFloat()
-        val contentHeight = maxOf(previewWidth, previewHeight).toFloat()
-        val scale = maxOf(viewWidth / contentWidth, viewHeight / contentHeight)
+        val rotation = textureView.display?.rotation ?: Surface.ROTATION_0
+        val bufferLong = maxOf(previewWidth, previewHeight).toFloat()
+        val bufferShort = minOf(previewWidth, previewHeight).toFloat()
         val matrix = Matrix()
-        matrix.setScale(
-            contentWidth * scale / viewWidth,
-            contentHeight * scale / viewHeight,
-            viewWidth / 2f,
-            viewHeight / 2f,
-        )
+        val centerX = viewWidth / 2f
+        val centerY = viewHeight / 2f
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            val bufferRect = RectF(0f, 0f, bufferShort, bufferLong)
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(RectF(0f, 0f, viewWidth, viewHeight), bufferRect, Matrix.ScaleToFit.FILL)
+            val scale = maxOf(viewHeight / bufferShort, viewWidth / bufferLong)
+            matrix.postScale(scale, scale, centerX, centerY)
+            matrix.postRotate(90f * (rotation - 2), centerX, centerY)
+        } else {
+            val scale = maxOf(viewWidth / bufferShort, viewHeight / bufferLong)
+            matrix.setScale(
+                bufferShort * scale / viewWidth,
+                bufferLong * scale / viewHeight,
+                centerX,
+                centerY,
+            )
+            if (rotation == Surface.ROTATION_180) matrix.postRotate(180f, centerX, centerY)
+        }
         textureView.setTransform(matrix)
     }
 
