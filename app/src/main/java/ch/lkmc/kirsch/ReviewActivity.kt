@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -33,6 +34,7 @@ class ReviewActivity : Activity() {
     private lateinit var cornerEditor: CornerEditorView
     private lateinit var status: TextView
     private val editingControls = mutableListOf<View>()
+    private var loadGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,28 +43,72 @@ class ReviewActivity : Activity() {
         loadScan()
     }
 
-    private fun loadScan() {
+    private class LoadedScan(
+        val bitmap: Bitmap,
+        val points: List<Point>,
+        val statusText: String,
+        val editable: Boolean,
+    )
+
+    /**
+     * Loads the manifest and the multi-megapixel working bitmap off the main
+     * thread — decoding inline froze the screen on open and after every
+     * task. [statusOverride] replaces the state-derived status line so task
+     * results survive the reload. Must be called from the main thread.
+     */
+    private fun loadScan(statusOverride: String? = null) {
+        val generation = ++loadGeneration
+        editingControls.forEach { it.isEnabled = false }
+        cornerEditor.isEnabled = false
+        Thread({
+            val loaded = runCatching(::readScan)
+            runOnUiThread {
+                if (isFinishing || isDestroyed || generation != loadGeneration) {
+                    // A superseded or abandoned load frees its bitmap right
+                    // away instead of waiting for the GC to notice it.
+                    loaded.getOrNull()?.bitmap?.recycle()
+                    return@runOnUiThread
+                }
+                loaded.fold(
+                    onSuccess = { scan ->
+                        cornerEditor.setImage(scan.bitmap)
+                        cornerEditor.setNormalizedPoints(scan.points)
+                        status.text = statusOverride ?: scan.statusText
+                        cornerEditor.isEnabled = scan.editable
+                        editingControls.forEach { it.isEnabled = scan.editable }
+                    },
+                    onFailure = {
+                        // A task that already succeeded keeps its message
+                        // even if only the reload fails, so the user is not
+                        // told the operation failed when it did not.
+                        status.text = statusOverride
+                            ?: getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                    },
+                )
+                if (statusOverride != null) status.announceForAccessibility(status.text)
+            }
+        }, "kirsch-scan-load").start()
+    }
+
+    private fun readScan(): LoadedScan {
         val manifest = JSONObject(manifestFile.readText())
         val root = requireNotNull(manifestFile.parentFile)
         val working = File(root, manifest.getString("working_image_path"))
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(working, 1800) }
         val bitmap = requireNotNull(BitmapFactory.decodeFile(working.absolutePath, options))
-        cornerEditor.setImage(bitmap)
         val quadRecord = if (manifest.has("manual_quad")) {
             manifest.getJSONObject("manual_quad")
         } else {
             manifest.getJSONObject("selected_quad")
         }
         val selected = quadRecord.getJSONArray("normalized_points")
-        cornerEditor.setNormalizedPoints(
-            (0 until selected.length()).map { index ->
-                val point = selected.getJSONArray(index)
-                Point(point.getDouble(0), point.getDouble(1))
-            },
-        )
+        val points = (0 until selected.length()).map { index ->
+            val point = selected.getJSONArray(index)
+            Point(point.getDouble(0), point.getDouble(1))
+        }
         val accepted = manifest.optString("state") == "accepted"
         val exported = manifest.optJSONObject("extensions")?.has("gallery_uri") == true
-        status.text = if (accepted && exported) {
+        val statusText = if (accepted && exported) {
             getString(R.string.scan_accepted)
         } else if (accepted) {
             // Accepted before the photo-library export existed: locked, but
@@ -78,9 +124,7 @@ class ReviewActivity : Activity() {
                 },
             )
         }
-        val editable = manifest.optString("state") == "review"
-        cornerEditor.isEnabled = editable
-        editingControls.forEach { it.isEnabled = editable }
+        return LoadedScan(bitmap, points, statusText, manifest.optString("state") == "review")
     }
 
     private fun buildUi() {
@@ -188,16 +232,11 @@ class ReviewActivity : Activity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
-                    onSuccess = {
-                        loadScan()
-                        status.text = getString(R.string.derivative_created, it.name)
-                    },
+                    onSuccess = { loadScan(getString(R.string.derivative_created, it.name)) },
                     onFailure = {
-                        loadScan()
-                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                        loadScan(getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName))
                     },
                 )
-                status.announceForAccessibility(status.text)
             }
         }, "kirsch-derivative").start()
     }
@@ -234,16 +273,11 @@ class ReviewActivity : Activity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
-                    onSuccess = {
-                        loadScan()
-                        status.text = getString(R.string.scan_accepted)
-                    },
+                    onSuccess = { loadScan(getString(R.string.scan_accepted)) },
                     onFailure = {
-                        loadScan()
-                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                        loadScan(getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName))
                     },
                 )
-                status.announceForAccessibility(status.text)
             }
         }, "kirsch-save").start()
     }
