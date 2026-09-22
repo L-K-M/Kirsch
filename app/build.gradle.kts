@@ -42,6 +42,6 @@ android {
 }
 
 dependencies {
-    implementation("org.opencv:opencv:4.10.0")
+    implementation("org.opencv:opencv:5.0.0.1")
     testImplementation("junit:junit:4.13.2")
 }
