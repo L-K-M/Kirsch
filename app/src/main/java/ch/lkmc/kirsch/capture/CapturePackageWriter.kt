@@ -148,7 +148,8 @@ class CapturePackageWriter(
                 "extensions",
                 JSONObject()
                     .put("image_timestamp_ns", image.timestamp)
-                    .put("capture_result_frame_number", tagged.result.frameNumber),
+                    .put("capture_result_frame_number", tagged.result.frameNumber)
+                    .put("sweep_position", tag.sweepPosition?.let(CaptureMetadata::sweepPositionJson)),
             )
         frameRecords[tag.frameIndex] = record
         return frameRecords.size

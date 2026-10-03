@@ -46,115 +46,135 @@ class ScanProcessor(private val context: Context) {
         val stateMachine = ScanStateMachine(ScanState.QUEUED)
         writeState(manifestFile, captureId, stateMachine.transition(ScanState.PROCESSING), processingAttempt)
         val (_, frames) = CaptureFrameLoader.load(captureDirectory)
-        val sourceBitDepth = frames.maxOf(CaptureFrameLoader.LoadedFrame::sourceBitDepth)
-        var registrationReport = JSONArray()
-        var fusionFailure: String? = null
-        var usedFusion = false
-        val fused: ConservativeFusion.Result
-        if (frames.size >= 3) {
-            val fallbackImage = frames[frames.size / 2].bgr.clone()
-            val registration = runCatching { BurstRegistration.register(frames) }.getOrElse { error ->
-                fusionFailure = error.message ?: error.javaClass.simpleName
-                null
-            }
-            if (registration != null && registration.acceptedFrameCount >= 3) {
-                registrationReport = registration.report
-                fused = ConservativeFusion.fuse(
-                    registration.aligned,
-                    registration.validMasks,
-                    registration.referenceIndex,
-                    registration.acceptedFrameCount,
-                )
-                registration.aligned.forEach(Mat::release)
-                registration.validMasks.forEach(Mat::release)
-                usedFusion = true
-                fallbackImage.release()
-            } else {
+        val resources = frames.map { it.bgr }.toMutableList()
+        fun own(image: Mat): Mat = image.also { resources += it }
+        try {
+            val referenceIndex = BurstRegistration.referenceIndex(frames)
+            val intrinsics = frames[referenceIndex].intrinsics
+            val sourceBitDepth = frames.maxOf(CaptureFrameLoader.LoadedFrame::sourceBitDepth)
+            var registrationReport = JSONArray()
+            var fusionFailure: String? = null
+            var usedFusion = false
+            val fused: ConservativeFusion.Result
+            if (frames.size >= 3) {
+                val fallbackImage = own(frames[referenceIndex].bgr.clone())
+                val registration = runCatching { BurstRegistration.register(frames) }.getOrElse { error ->
+                    fusionFailure = error.message ?: error.javaClass.simpleName
+                    null
+                }
                 if (registration != null) {
+                    resources.addAll(registration.aligned)
+                    resources.addAll(registration.validMasks)
+                }
+                if (registration != null && registration.acceptedFrameCount >= 3) {
                     registrationReport = registration.report
+                    fused = ConservativeFusion.fuse(
+                        registration.aligned,
+                        registration.validMasks,
+                        registration.referenceIndex,
+                        registration.acceptedFrameCount,
+                    )
                     registration.aligned.forEach(Mat::release)
                     registration.validMasks.forEach(Mat::release)
-                    fusionFailure = "Fewer than three frames passed registration"
+                    usedFusion = true
+                    fallbackImage.release()
+                } else {
+                    if (registration != null) {
+                        registrationReport = registration.report
+                        registration.aligned.forEach(Mat::release)
+                        registration.validMasks.forEach(Mat::release)
+                        fusionFailure = "Fewer than three frames passed registration"
+                    }
+                    fused = singleFrame(fallbackImage, fusionFailed = true)
+                    fallbackImage.release()
                 }
-                fused = singleFrame(fallbackImage, fusionFailed = true)
-                fallbackImage.release()
+            } else {
+                fused = singleFrame(frames[referenceIndex].bgr, fusionFailed = false)
             }
-        } else {
-            fused = singleFrame(frames[frames.size / 2].bgr, fusionFailed = false)
-        }
-        val workingDirectory = File(root, "working").apply { mkdirs() }
-        val fusedWorking = File(workingDirectory, "fused.png")
-        require(Imgcodecs.imwrite(fusedWorking.absolutePath, fused.image)) { "Unable to persist fused working image" }
-        val detectedQuads = PrintGeometry.detect(fused.image)
-        val selectedQuad = detectedQuads.firstOrNull() ?: PrintGeometry.fullFrame(fused.image)
-        val rectified = PrintGeometry.rectify(fused.image, selectedQuad)
-        val confidence = PrintGeometry.rectify(fused.confidence, selectedQuad, Imgproc.INTER_NEAREST)
-        val failure = PrintGeometry.rectify(fused.failure, selectedQuad, Imgproc.INTER_NEAREST)
-        val derivatives = File(root, "derivatives").apply { mkdirs() }
-        val preview = File(derivatives, "acquisition-master.jpg")
-        val tiff = File(derivatives, "acquisition-master.tif")
-        val confidenceFile = File(derivatives, "confidence.png")
-        val failureFile = File(derivatives, "failure.png")
-        val jpegOptions = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 96)
-        require(Imgcodecs.imwrite(preview.absolutePath, rectified, jpegOptions)) { "JPEG export failed" }
-        jpegOptions.release()
-        val sixteenBit = Mat()
-        rectified.convertTo(sixteenBit, CvType.CV_16UC3, 257.0)
-        require(Imgcodecs.imwrite(tiff.absolutePath, sixteenBit)) { "TIFF export failed" }
-        require(Imgcodecs.imwrite(confidenceFile.absolutePath, confidence)) { "Confidence export failed" }
-        require(Imgcodecs.imwrite(failureFile.absolutePath, failure)) { "Failure export failed" }
-        sixteenBit.release()
-        val reportFile = File(root, "processing-report.json")
-        val report = JSONObject()
-            .put("capture_id", captureId)
-            .put("processor", "opencv-orb-magsac-conservative-v1")
-            .put("used_fusion", usedFusion)
-            .put("fusion_failure", fusionFailure)
-            .put("registration", registrationReport)
-            .put("detected_regions", quadsJson(detectedQuads, fused.image.cols(), fused.image.rows()))
-            .put("selected_quad", quadJson(selectedQuad, fused.image.cols(), fused.image.rows()))
-            .put("source_bit_depth", sourceBitDepth)
-            .put("tiff_container_bit_depth", 16)
-            .put("elapsed_ms", SystemClock.elapsedRealtime() - started)
-            .put("java_heap_used_bytes", usedHeapBytes())
-            .put("thermal_status_start", thermalStart)
-            .put("thermal_status_end", context.getSystemService(PowerManager::class.java)?.currentThermalStatus)
-            .put("processing_attempt", processingAttempt)
-        ScanManifestStore.write(reportFile, report)
-        val manifest = JSONObject()
-            .put("schema_version", "1.0.0")
-            .put("scan_id", captureId)
-            .put("created_utc", Instant.now().toString())
-            .put("state", stateMachine.transition(ScanState.REVIEW).name.lowercase())
-            .put("processing_attempt", processingAttempt)
-            .put("acquisition_manifest", "capture-package:$captureId")
-            .put("acquisition_sha256", sha256(captureManifest))
-            .put("source_retained", true)
-            .put("used_fusion", usedFusion)
-            .put("preview_path", preview.relativeTo(root).invariantSeparatorsPath)
-            .put("working_image_path", fusedWorking.relativeTo(root).invariantSeparatorsPath)
-            .put("processing_report", reportFile.relativeTo(root).invariantSeparatorsPath)
-            .put("selected_quad", quadJson(selectedQuad, fused.image.cols(), fused.image.rows()))
-            .put(
-                "derivatives",
-                JSONArray(
-                    listOf(
-                        derivativeRecord(root, preview, "acquisition-master", "image/jpeg", null),
-                        derivativeRecord(root, tiff, "acquisition-master", "image/tiff", null),
-                        derivativeRecord(root, confidenceFile, "confidence-map", "image/png", null),
-                        derivativeRecord(root, failureFile, "failure-map", "image/png", null),
+            resources.addAll(listOf(fused.image, fused.confidence, fused.failure))
+            val workingDirectory = File(root, "working").apply { mkdirs() }
+            val fusedWorking = File(workingDirectory, "fused.png")
+            require(Imgcodecs.imwrite(fusedWorking.absolutePath, fused.image)) { "Unable to persist fused working image" }
+            val detectedQuads = PrintGeometry.detect(fused.image)
+            val selectedQuad = detectedQuads.firstOrNull() ?: PrintGeometry.fullFrame(fused.image)
+            val rectified = own(PrintGeometry.rectify(fused.image, selectedQuad, intrinsics = intrinsics))
+            val confidence = own(PrintGeometry.rectify(fused.confidence, selectedQuad, Imgproc.INTER_NEAREST, intrinsics))
+            val failure = own(PrintGeometry.rectify(fused.failure, selectedQuad, Imgproc.INTER_NEAREST, intrinsics))
+            val derivatives = File(root, "derivatives").apply { mkdirs() }
+            val preview = File(derivatives, "acquisition-master.jpg")
+            val tiff = File(derivatives, "acquisition-master.tif")
+            val confidenceFile = File(derivatives, "confidence.png")
+            val failureFile = File(derivatives, "failure.png")
+            val jpegOptions = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 96).also { resources += it }
+            require(Imgcodecs.imwrite(preview.absolutePath, rectified, jpegOptions)) { "JPEG export failed" }
+            jpegOptions.release()
+            val sixteenBit = own(Mat())
+            rectified.convertTo(sixteenBit, CvType.CV_16UC3, 257.0)
+            require(Imgcodecs.imwrite(tiff.absolutePath, sixteenBit)) { "TIFF export failed" }
+            require(Imgcodecs.imwrite(confidenceFile.absolutePath, confidence)) { "Confidence export failed" }
+            require(Imgcodecs.imwrite(failureFile.absolutePath, failure)) { "Failure export failed" }
+            sixteenBit.release()
+            val reportFile = File(root, "processing-report.json")
+            val report = JSONObject()
+                .put("capture_id", captureId)
+                .put("processor", "opencv-orb-magsac-conservative-v2")
+                .put("used_fusion", usedFusion)
+                .put("fusion_failure", fusionFailure)
+                .put("reference_frame", frames[referenceIndex].index)
+                .put("auto_crop_detected", detectedQuads.isNotEmpty())
+                .put("registration", registrationReport)
+                .put("detected_regions", quadsJson(detectedQuads, fused.image.cols(), fused.image.rows()))
+                .put("selected_quad", quadJson(selectedQuad, fused.image.cols(), fused.image.rows()))
+                .put("source_bit_depth", sourceBitDepth)
+                .put("tiff_container_bit_depth", 16)
+                .put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+                .put("java_heap_used_bytes", usedHeapBytes())
+                .put("thermal_status_start", thermalStart)
+                .put("thermal_status_end", context.getSystemService(PowerManager::class.java)?.currentThermalStatus)
+                .put("processing_attempt", processingAttempt)
+            ScanManifestStore.write(reportFile, report)
+            val manifest = JSONObject()
+                .put("schema_version", "1.0.0")
+                .put("scan_id", captureId)
+                .put("created_utc", Instant.now().toString())
+                .put("state", stateMachine.transition(ScanState.REVIEW).name.lowercase())
+                .put("processing_attempt", processingAttempt)
+                .put("acquisition_manifest", "capture-package:$captureId")
+                .put("acquisition_sha256", sha256(captureManifest))
+                .put("source_retained", true)
+                .put("used_fusion", usedFusion)
+                .put("fusion_failure", fusionFailure)
+                .put("auto_crop_detected", detectedQuads.isNotEmpty())
+                .put("working_intrinsics", intrinsics?.toJson())
+                .put("preview_path", preview.relativeTo(root).invariantSeparatorsPath)
+                .put("working_image_path", fusedWorking.relativeTo(root).invariantSeparatorsPath)
+                .put("processing_report", reportFile.relativeTo(root).invariantSeparatorsPath)
+                .put("selected_quad", quadJson(selectedQuad, fused.image.cols(), fused.image.rows()))
+                .put(
+                    "derivatives",
+                    JSONArray(
+                        listOf(
+                            derivativeRecord(root, preview, "acquisition-master", "image/jpeg", null),
+                            derivativeRecord(root, tiff, "acquisition-master", "image/tiff", null),
+                            derivativeRecord(root, confidenceFile, "confidence-map", "image/png", null),
+                            derivativeRecord(root, failureFile, "failure-map", "image/png", null),
+                        ),
                     ),
-                ),
-            )
-        ScanManifestStore.write(manifestFile, manifest)
-        rectified.release()
-        confidence.release()
-        failure.release()
-        fused.image.release()
-        fused.confidence.release()
-        fused.failure.release()
-        frames.forEach { it.bgr.release() }
-        return Result(manifestFile, preview, usedFusion)
+                )
+            ScanManifestStore.write(manifestFile, manifest)
+            rectified.release()
+            confidence.release()
+            failure.release()
+            fused.image.release()
+            fused.confidence.release()
+            fused.failure.release()
+            frames.forEach { it.bgr.release() }
+            return Result(manifestFile, preview, usedFusion)
+        } finally {
+            // Native storage is outside the Java heap. Every failure path must
+            // release it before the worker proceeds to the next scan.
+            resources.forEach(Mat::release)
+        }
     }
 
     fun scanRoot(): File = File(context.getExternalFilesDir("scans") ?: context.filesDir, "product")
@@ -208,7 +228,7 @@ class ScanProcessor(private val context: Context) {
         .put("area_pixels", quad.area)
         .put(
             "normalized_points",
-            JSONArray(quad.points.map { point -> JSONArray(listOf(point.x / width, point.y / height)) }),
+            JSONArray(quad.points.map { point -> JSONArray(listOf(point.x / (width - 1).coerceAtLeast(1), point.y / (height - 1).coerceAtLeast(1))) }),
         )
 
     private fun derivativeRecord(

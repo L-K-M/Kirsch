@@ -29,8 +29,7 @@ object ThreeAStatePolicy {
         val aeReady = !aeLockRequired || aeState == CaptureResult.CONTROL_AE_STATE_LOCKED
         val awbReady = !awbLockRequired || awbState == CaptureResult.CONTROL_AWB_STATE_LOCKED
         val afReady = !focusLockRequired ||
-            afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+            afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
         return aeReady && awbReady && afReady
     }
 

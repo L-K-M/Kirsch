@@ -14,42 +14,45 @@ object PrintGeometry {
 
     fun detect(image: Mat, minimumAreaFraction: Double = 0.12): List<Quad> {
         val scale = minOf(1.0, 1600.0 / maxOf(image.cols(), image.rows()))
-        val small = Mat()
-        Imgproc.resize(image, small, Size(), scale, scale, Imgproc.INTER_AREA)
-        val gray = Mat()
-        Imgproc.cvtColor(small, gray, Imgproc.COLOR_BGR2GRAY)
-        Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
-        val edges = Mat()
-        Imgproc.Canny(gray, edges, 45.0, 135.0)
+        val resources = mutableListOf<Mat>()
         val contours = mutableListOf<MatOfPoint>()
-        val hierarchy = Mat()
-        Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
-        val minimumArea = small.cols().toDouble() * small.rows() * minimumAreaFraction
-        val quads = contours.mapNotNull { contour ->
-            val curve = MatOfPoint2f(*contour.toArray())
-            val approximation = MatOfPoint2f()
-            Imgproc.approxPolyDP(curve, approximation, Imgproc.arcLength(curve, true) * 0.02, true)
-            val points = approximation.toArray()
-            val area = if (points.size == 4) kotlin.math.abs(Imgproc.contourArea(approximation)) else 0.0
-            val polygon = MatOfPoint(*points)
-            val convex = points.size == 4 && Imgproc.isContourConvex(polygon)
-            curve.release()
-            approximation.release()
-            polygon.release()
-            contour.release()
-            if (area >= minimumArea && convex) {
-                Quad(order(points.map { Point(it.x / scale, it.y / scale) }), area / (scale * scale))
-            } else {
-                null
-            }
-        }.distinctBy { quad ->
-            quad.points.joinToString { point -> "${(point.x / 20).toInt()},${(point.y / 20).toInt()}" }
-        }.sortedByDescending(Quad::area)
-        hierarchy.release()
-        edges.release()
-        gray.release()
-        small.release()
-        return quads
+        fun own(image: Mat): Mat = image.also { resources += it }
+        try {
+            val small = own(Mat())
+            Imgproc.resize(image, small, Size(), scale, scale, Imgproc.INTER_AREA)
+            val gray = own(Mat())
+            Imgproc.cvtColor(small, gray, Imgproc.COLOR_BGR2GRAY)
+            Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
+            val edges = own(Mat())
+            Imgproc.Canny(gray, edges, 45.0, 135.0)
+            val hierarchy = own(Mat())
+            Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+            val minimumArea = small.cols().toDouble() * small.rows() * minimumAreaFraction
+            val quads = contours.mapNotNull { contour ->
+                val curve = MatOfPoint2f(*contour.toArray()).also { resources += it }
+                val approximation = MatOfPoint2f().also { resources += it }
+                Imgproc.approxPolyDP(curve, approximation, Imgproc.arcLength(curve, true) * 0.02, true)
+                val points = approximation.toArray()
+                val area = if (points.size == 4) kotlin.math.abs(Imgproc.contourArea(approximation)) else 0.0
+                val polygon = MatOfPoint(*points).also { resources += it }
+                val convex = points.size == 4 && Imgproc.isContourConvex(polygon)
+                curve.release()
+                approximation.release()
+                polygon.release()
+                contour.release()
+                if (area >= minimumArea && convex) {
+                    Quad(order(points.map { Point(it.x / scale, it.y / scale) }), area / (scale * scale))
+                } else {
+                    null
+                }
+            }.distinctBy { quad ->
+                quad.points.joinToString { point -> "${(point.x / 20).toInt()},${(point.y / 20).toInt()}" }
+            }.sortedByDescending(Quad::area)
+            return quads
+        } finally {
+            resources.forEach(Mat::release)
+            contours.forEach(Mat::release)
+        }
     }
 
     fun fullFrame(image: Mat): Quad = Quad(
@@ -90,41 +93,13 @@ object PrintGeometry {
     )
 
     /**
-     * Recovers the print's true width-to-height ratio from the projection of
-     * its four corners, assuming the print is a rectangle and the camera has
-     * square pixels with its principal point at the image centre.
-     *
-     * The projected edge lengths are not the physical ones: under perspective
-     * the far edge of a tilted print is shorter than the near edge, so sizing
-     * the rectified output by projected edges stretches every off-axis scan.
-     * This is the standard rectangle-from-quadrilateral construction (Zhang &
-     * He, *Whiteboard Scanning and Image Enhancement*, 2003): solve for the
-     * focal length that makes the two vanishing directions orthogonal, then
-     * measure the rectangle in that camera's frame.
-     *
-     * Returns null when the construction degenerates, and the caller falls
-     * back to the projected edge lengths. Three ways that happens, and they
-     * are not equally benign:
-     *
-     * - **Near-frontal view.** Both vanishing points run off to infinity.
-     *   The projected edges are then already exactly the physical ratio, so
-     *   the fallback loses nothing.
-     * - **Single-axis tilt.** A phone held level side to side but tipped
-     *   forward over a print keeps one pair of edges parallel in the image,
-     *   so only one vanishing point is finite and no focal length can be
-     *   solved for. The fallback is *not* accurate here — a 3:2 print at 35
-     *   degrees of pure pitch comes out about 30% too wide. Recovering it
-     *   needs the camera's own focal length in pixels, which means recording
-     *   SENSOR_INFO_PHYSICAL_SIZE alongside the LENS_FOCAL_LENGTH the
-     *   capture package already stores, and threading intrinsics into
-     *   processing. That is a separate change.
-     * - **Corners that are not a projected rectangle.** The solve gives a
-     *   negative focal length; there is nothing to recover.
-     *
-     * [points] must be in the order this object produces: top-left,
-     * top-right, bottom-right, bottom-left.
+     * Recovers rectangle shape in the camera frame. Recorded intrinsics also
+     * handle frontal and single-axis poses, where vanishing points alone
+     * cannot determine focal length. Older packages can still use the
+     * uncalibrated two-axis solve, with projected edges as the final fallback.
+     * Corners are top-left, top-right, bottom-right, bottom-left.
      */
-    fun aspectRatio(points: List<Point>, imageWidth: Int, imageHeight: Int): Double? {
+    fun aspectRatio(points: List<Point>, imageWidth: Int, imageHeight: Int, intrinsics: CameraIntrinsics? = null): Double? {
         if (points.size != 4 || imageWidth <= 0 || imageHeight <= 0) return null
         if (points.any { !it.x.isFinite() || !it.y.isFinite() }) return null
         // Zhang & He index the corners row-major: m1 m2 over m3 m4.
@@ -141,6 +116,15 @@ object PrintGeometry {
         val n3 = scaleMinus(k3, m3, m1)
         if (n2.any { !it.isFinite() } || n3.any { !it.isFinite() }) return null
 
+        if (intrinsics != null) {
+            fun lengthSquared(n: DoubleArray): Double {
+                val x = (n[0] - intrinsics.centerX * n[2]) / intrinsics.focalX
+                val y = (n[1] - intrinsics.centerY * n[2]) / intrinsics.focalY
+                return x * x + y * y + n[2] * n[2]
+            }
+            return plausibleRatio(lengthSquared(n2), lengthSquared(n3))
+        }
+
         val centerX = imageWidth / 2.0
         val centerY = imageHeight / 2.0
         // Both vanishing points at infinity means an affine (near-frontal)
@@ -156,7 +140,11 @@ object PrintGeometry {
 
         val widthSquared = normalizedLengthSquared(n2, centerX, centerY, squaredFocal)
         val heightSquared = normalizedLengthSquared(n3, centerX, centerY, squaredFocal)
-        if (heightSquared <= 0.0 || !widthSquared.isFinite() || !heightSquared.isFinite()) return null
+        return plausibleRatio(widthSquared, heightSquared)
+    }
+
+    private fun plausibleRatio(widthSquared: Double, heightSquared: Double): Double? {
+        if (widthSquared <= 0.0 || heightSquared <= 0.0 || !widthSquared.isFinite() || !heightSquared.isFinite()) return null
         val ratio = kotlin.math.sqrt(widthSquared / heightSquared)
         // A recovered ratio far outside anything a print can be means the
         // corners were not a projected rectangle.
@@ -190,14 +178,15 @@ object PrintGeometry {
      * same total pixel count as the projected-edge estimate so no resolution
      * is invented; otherwise the projected edges are used directly.
      */
-    fun rectify(image: Mat, quad: Quad, interpolation: Int = Imgproc.INTER_CUBIC): Mat {
+    fun rectify(image: Mat, quad: Quad, interpolation: Int = Imgproc.INTER_CUBIC, intrinsics: CameraIntrinsics? = null): Mat {
+        if (quad.points == fullFrame(image).points) return image.clone()
         val (topLeft, topRight, bottomRight, bottomLeft) = quad.points
         val projectedWidth = maxOf(distance(topLeft, topRight), distance(bottomLeft, bottomRight))
         val projectedHeight = maxOf(distance(topLeft, bottomLeft), distance(topRight, bottomRight))
         val (width, height) = outputSize(
             projectedWidth,
             projectedHeight,
-            aspectRatio(quad.points, image.cols(), image.rows()),
+            aspectRatio(quad.points, image.cols(), image.rows(), intrinsics),
         )
         val source = MatOfPoint2f(topLeft, topRight, bottomRight, bottomLeft)
         val destination = MatOfPoint2f(
@@ -206,13 +195,21 @@ object PrintGeometry {
             Point(width - 1.0, height - 1.0),
             Point(0.0, height - 1.0),
         )
-        val transform = Imgproc.getPerspectiveTransform(source, destination)
+        var transform: Mat? = null
         val output = Mat()
-        Imgproc.warpPerspective(image, output, transform, Size(width.toDouble(), height.toDouble()), interpolation)
-        transform.release()
-        source.release()
-        destination.release()
-        return output
+        try {
+            val mapping = Imgproc.getPerspectiveTransform(source, destination)
+            transform = mapping
+            Imgproc.warpPerspective(image, output, mapping, Size(width.toDouble(), height.toDouble()), interpolation)
+            return output
+        } catch (error: Throwable) {
+            output.release()
+            throw error
+        } finally {
+            transform?.release()
+            source.release()
+            destination.release()
+        }
     }
 
     private fun order(points: List<Point>): List<Point> {

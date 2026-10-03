@@ -8,6 +8,22 @@ from benchmark.tools.kirsch_benchmark import validate_scan_package
 
 
 class ScanPackageValidatorTest(unittest.TestCase):
+    def test_rejects_invalid_geometry_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "scan.json"
+            base = {"schema_version": "1.0.0", "scan_id": "capture-test", "state": "failed",
+                    "acquisition_manifest": "capture-package:capture-test", "error": "test failure"}
+            for field, value, expected in [
+                ("output_rotation_quarter_turns", True, "OUTPUT_ROTATION"),
+                ("output_rotation_quarter_turns", 4, "OUTPUT_ROTATION"),
+                ("auto_crop_detected", 1, "TYPE_BOOLEAN"),
+                ("fusion_failure", "", "FUSION_FAILURE"),
+                ("working_intrinsics", {"focal_x": 0, "focal_y": 1, "center_x": 0, "center_y": 0}, "CAMERA_INTRINSICS"),
+            ]:
+                with self.subTest(field=field, value=value):
+                    path.write_text(json.dumps(dict(base, **{field: value})))
+                    self.assertIn(expected, {issue.code for issue in validate_scan_package(path)})
+
     def _write_capture(self, directory: Path, capture_id: str) -> Path:
         frames = directory / "frames"
         frames.mkdir(parents=True)
@@ -94,6 +110,10 @@ class ScanPackageValidatorTest(unittest.TestCase):
                 "acquisition_sha256": hashlib.sha256(capture_manifest.read_bytes()).hexdigest(),
                 "source_retained": True,
                 "used_fusion": True,
+                "auto_crop_detected": False,
+                "fusion_failure": "insufficient registration",
+                "output_rotation_quarter_turns": 1,
+                "working_intrinsics": {"focal_x": 1500, "focal_y": 1500, "center_x": 2000, "center_y": 1500},
                 "preview_path": "derivatives/acquisition-master.jpg",
                 "working_image_path": "working/fused.png",
                 "processing_report": "processing-report.json",
@@ -102,6 +122,7 @@ class ScanPackageValidatorTest(unittest.TestCase):
                     {
                         "path": "derivatives/acquisition-master.jpg",
                         "kind": "acquisition-master",
+                        "output_rotation_quarter_turns": 1,
                         "bytes": preview.stat().st_size,
                         "sha256": digest,
                     }

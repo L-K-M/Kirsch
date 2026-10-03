@@ -2,5 +2,12 @@
 
 ## Unreleased
 
-- No changes recorded yet. Earlier history lives in the commit log and any
-  GitHub releases; future changes will be noted here.
+- Improve sweep focus, shutter choice, blur rejection, and viewpoint selection.
+- Preserve rendered color and detail with safer registration and fusion.
+- Correct calibrated print shape at single-axis tilt and preserve full-frame pixels.
+- Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
+- Offer failed-scan retry and guard editing and photo-library publication.
+- Run native OpenCV and review-flow regressions on an Android emulator in CI.
+
+Physical glossy-print comparisons against the stock camera and PhotoScan remain
+unverified; synthetic tests and successful builds do not establish that result.

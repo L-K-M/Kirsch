@@ -1,5 +1,6 @@
 package ch.lkmc.kirsch.imaging
 
+import ch.lkmc.kirsch.geometry.CameraIntrinsics
 import java.io.File
 import java.security.MessageDigest
 import org.json.JSONObject
@@ -13,6 +14,7 @@ object CaptureFrameLoader {
         val bgr: Mat,
         val exposureProduct: Double?,
         val sourceBitDepth: Int,
+        val intrinsics: CameraIntrinsics? = null,
     )
 
     fun load(captureDirectory: File): Pair<JSONObject, List<LoadedFrame>> {
@@ -22,17 +24,33 @@ object CaptureFrameLoader {
             "RAW acquisition retained without derivative: validated DNG demosaic/color processing is not available; capture a YUV quality sweep for processing"
         }
         val allFrameRecords = manifest.getJSONArray("frames")
-        val selectedPositions = evenlySpacedPositions(allFrameRecords.length(), maximum = 5)
-        val frames = buildList {
+        val characteristics = manifest.optJSONObject("camera")?.optJSONObject("characteristics_file")?.let { record ->
+            val file = resolveAsset(captureDirectory, record.getString("path"))
+            verifyFile(file, record)
+            JSONObject(file.readText())
+        }
+        val observations = (0 until allFrameRecords.length()).map { position ->
+            val record = allFrameRecords.getJSONObject(position)
+            val observation = record.optJSONObject("extensions")?.optJSONObject("sweep_position")
+            CaptureFrameSelection.Observation(
+                observation?.optDouble("x", Double.NaN) ?: Double.NaN,
+                observation?.optDouble("y", Double.NaN) ?: Double.NaN,
+                observation?.optDouble("sharpness", Double.NaN) ?: Double.NaN,
+            )
+        }
+        val selectedPositions = CaptureFrameSelection.positions(allFrameRecords.length(), maximum = 5, observations)
+        val frames = mutableListOf<LoadedFrame>()
+        try {
             for (position in selectedPositions) {
                 val record = allFrameRecords.getJSONObject(position)
+                val frameIndex = record.getInt("frame_index")
                 val files = record.getJSONArray("files")
                 var payload: File? = null
                 var role: String? = null
                 var metadata: File? = null
                 for (index in 0 until files.length()) {
                     val file = files.getJSONObject(index)
-                    val resolved = File(captureDirectory, file.getString("path"))
+                    val resolved = resolveAsset(captureDirectory, file.getString("path"))
                     verifyFile(resolved, file)
                     when (file.getString("role")) {
                         "i420", "dng", "raw-sensor" -> {
@@ -42,7 +60,8 @@ object CaptureFrameLoader {
                         "capture-metadata" -> metadata = resolved
                     }
                 }
-                val source = requireNotNull(payload) { "Frame ${record.getInt("frame_index")} has no payload" }
+                val meta = metadata?.let { JSONObject(it.readText()) }
+                val source = requireNotNull(payload) { "Frame $frameIndex has no payload" }
                 val image = if (role == "i420") {
                     loadI420(source, record.getInt("width"), record.getInt("height"))
                 } else {
@@ -51,37 +70,49 @@ object CaptureFrameLoader {
                 require(!image.empty()) { "Unable to decode ${source.name}; the acquisition is retained" }
                 val bgr = toEightBitBgr(image)
                 if (bgr !== image) image.release()
-                val meta = metadata?.let { JSONObject(it.readText()) }
                 val exposure = meta?.optionalPositiveLong("sensor_exposure_time_ns")
                 val sensitivity = meta?.optionalPositiveLong("sensor_sensitivity_iso")
-                add(
-                    LoadedFrame(
-                        index = record.getInt("frame_index"),
-                        bgr = bgr,
-                        exposureProduct = if (exposure != null && sensitivity != null) {
-                            exposure.toDouble() * sensitivity.toDouble()
-                        } else {
-                            null
-                        },
-                        sourceBitDepth = 8,
-                    ),
+                val loaded = LoadedFrame(
+                    index = frameIndex,
+                    bgr = bgr,
+                    exposureProduct = if (exposure != null && sensitivity != null) {
+                        exposure.toDouble() * sensitivity.toDouble()
+                    } else {
+                        null
+                    },
+                    sourceBitDepth = 8,
+                    intrinsics = if (characteristics != null && meta != null) {
+                        CameraIntrinsics.fromCapture(characteristics, meta, bgr.cols(), bgr.rows())
+                    } else null,
                 )
+                frames += loaded
             }
+            require(frames.isNotEmpty()) { "Capture package has no frames" }
+            return manifest to frames
+        } catch (error: Throwable) {
+            frames.forEach { it.bgr.release() }
+            throw error
         }
-        require(frames.isNotEmpty()) { "Capture package has no frames" }
-        return manifest to frames
     }
 
     private fun loadI420(file: File, width: Int, height: Int): Mat {
         require(width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0)
+        val pixels = width.toLong() * height
+        require(pixels <= Int.MAX_VALUE / 3) { "I420 image dimensions exceed decoder limits" }
         val bytes = file.readBytes()
-        require(bytes.size == width * height * 3 / 2) { "Invalid I420 byte count for ${file.name}" }
+        require(bytes.size.toLong() == pixels * 3 / 2) { "Invalid I420 byte count for ${file.name}" }
         val yuv = Mat(height * 3 / 2, width, CvType.CV_8UC1)
         yuv.put(0, 0, bytes)
         val bgr = Mat()
-        Imgproc.cvtColor(yuv, bgr, Imgproc.COLOR_YUV2BGR_I420)
-        yuv.release()
-        return bgr
+        try {
+            Imgproc.cvtColor(yuv, bgr, Imgproc.COLOR_YUV2BGR_I420)
+            return bgr
+        } catch (error: Throwable) {
+            bgr.release()
+            throw error
+        } finally {
+            yuv.release()
+        }
     }
 
     private fun toEightBitBgr(source: Mat): Mat {
@@ -100,9 +131,14 @@ object CaptureFrameLoader {
     private fun JSONObject.optionalPositiveLong(name: String): Long? =
         if (!has(name) || isNull(name)) null else optLong(name).takeIf { it > 0 }
 
-    private fun evenlySpacedPositions(count: Int, maximum: Int): List<Int> {
-        if (count <= maximum) return (0 until count).toList()
-        return (0 until maximum).map { index -> index * (count - 1) / (maximum - 1) }.distinct()
+    private fun resolveAsset(directory: File, path: String): File {
+        require(path.isNotBlank() && !File(path).isAbsolute && !path.contains('\\') &&
+            path.split('/').none { it.isEmpty() || it == "." || it == ".." }) { "Invalid acquisition asset path" }
+        val file = File(directory, path)
+        require(file.canonicalFile.toPath().startsWith(directory.canonicalFile.toPath())) {
+            "Acquisition asset escapes its package"
+        }
+        return file
     }
 
     private fun verifyFile(file: File, record: JSONObject) {

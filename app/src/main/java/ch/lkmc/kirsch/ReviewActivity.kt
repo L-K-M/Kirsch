@@ -34,30 +34,49 @@ import java.util.Locale
 import java.util.UUID
 import org.json.JSONObject
 import org.opencv.core.Point
+import kotlin.math.abs
 
 class ReviewActivity : Activity() {
     private lateinit var manifestFile: File
     private lateinit var cornerEditor: CornerEditorView
+    private lateinit var scanPreview: ScanPreviewView
+    private lateinit var previewDetails: TextView
+    private lateinit var qualityAdvisory: TextView
     private lateinit var status: TextView
     private lateinit var activeOutput: TextView
     private lateinit var revertButton: Button
+    private lateinit var saveButton: Button
+    private lateinit var rotateButton: Button
     private val editingControls = mutableListOf<View>()
     private var loadGeneration = 0
+    private var operationInProgress = true
+    private var editable = false
+    private var restoredActive = false
+    private var appliedPoints = emptyList<Point>()
+    private var readyStatus = ""
+    private enum class DraftPolicy { PRESERVE, RESET }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SystemBars.optIn(this)
         manifestFile = File(requireNotNull(intent.getStringExtra(EXTRA_MANIFEST)))
         buildUi()
-        loadScan()
+        val draft = savedInstanceState?.getDoubleArray(STATE_DRAFT_CORNERS)
+            ?.takeIf { it.size == 8 }
+            ?.toList()?.chunked(2)?.map { Point(it[0], it[1]) }
+        loadScan(pointsOverride = draft)
     }
 
     private class LoadedScan(
         val bitmap: Bitmap,
+        val previewBitmap: Bitmap,
+        val pixelWidth: Int,
+        val pixelHeight: Int,
         val points: List<Point>,
         val statusText: String,
         val editable: Boolean,
         val restoredLabel: String?,
+        val advisory: String,
     )
 
     /**
@@ -66,10 +85,9 @@ class ReviewActivity : Activity() {
      * task. [statusOverride] replaces the state-derived status line so task
      * results survive the reload. Must be called from the main thread.
      */
-    private fun loadScan(statusOverride: String? = null) {
+    private fun loadScan(statusOverride: String? = null, pointsOverride: List<Point>? = null) {
         val generation = ++loadGeneration
-        editingControls.forEach { it.isEnabled = false }
-        cornerEditor.isEnabled = false
+        setBusy(true)
         Thread({
             val loaded = runCatching(::readScan)
             runOnUiThread {
@@ -77,15 +95,24 @@ class ReviewActivity : Activity() {
                     // A superseded or abandoned load frees its bitmap right
                     // away instead of waiting for the GC to notice it.
                     loaded.getOrNull()?.bitmap?.recycle()
+                    loaded.getOrNull()?.previewBitmap?.recycle()
                     return@runOnUiThread
                 }
                 loaded.fold(
                     onSuccess = { scan ->
                         cornerEditor.setImage(scan.bitmap)
-                        cornerEditor.setNormalizedPoints(scan.points)
+                        scanPreview.setImage(scan.previewBitmap)
+                        previewDetails.text = getString(R.string.review_preview_dimensions, scan.pixelWidth, scan.pixelHeight)
+                        qualityAdvisory.text = scan.advisory
+                        qualityAdvisory.visibility = if (scan.advisory.isEmpty()) View.GONE else View.VISIBLE
+                        appliedPoints = scan.points
+                        cornerEditor.setNormalizedPoints(pointsOverride ?: scan.points)
                         status.text = statusOverride ?: scan.statusText
-                        cornerEditor.isEnabled = scan.editable
-                        editingControls.forEach { it.isEnabled = scan.editable }
+                        readyStatus = status.text.toString()
+                        editable = scan.editable
+                        restoredActive = scan.restoredLabel != null
+                        setBusy(false)
+                        if (editable && hasUnappliedCorners()) status.setText(R.string.unapplied_corners)
                         // What "SAVE TO PHOTOS" will actually export.
                         // Enhancements replace the active output, so the user
                         // needs to see which one is live.
@@ -94,14 +121,11 @@ class ReviewActivity : Activity() {
                         } else {
                             getString(R.string.active_output_restored, scan.restoredLabel)
                         }
-                        revertButton.isEnabled = scan.editable && scan.restoredLabel != null
                     },
                     onFailure = {
-                        // A task that already succeeded keeps its message
-                        // even if only the reload fails, so the user is not
-                        // told the operation failed when it did not.
-                        status.text = statusOverride
-                            ?: getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                        operationInProgress = false
+                        val failure = getString(R.string.review_load_failed, it.message ?: it.javaClass.simpleName)
+                        status.text = if (statusOverride == null) failure else "$statusOverride\n$failure"
                     },
                 )
                 if (statusOverride != null) status.announceForAccessibility(status.text)
@@ -110,58 +134,93 @@ class ReviewActivity : Activity() {
     }
 
     private fun readScan(): LoadedScan {
-        val manifest = JSONObject(manifestFile.readText())
+        val manifest = ScanManifestStore.read(manifestFile)
         val root = requireNotNull(manifestFile.parentFile)
         val working = File(root, manifest.getString("working_image_path"))
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(working, 1800) }
         val bitmap = requireNotNull(BitmapFactory.decodeFile(working.absolutePath, options))
-        val quadRecord = if (manifest.has("manual_quad")) {
-            manifest.getJSONObject("manual_quad")
-        } else {
-            manifest.getJSONObject("selected_quad")
-        }
-        val selected = quadRecord.getJSONArray("normalized_points")
-        val points = (0 until selected.length()).map { index ->
-            val point = selected.getJSONArray(index)
-            Point(point.getDouble(0), point.getDouble(1))
-        }
-        val accepted = manifest.optString("state") == "accepted"
-        val exported = manifest.optJSONObject("extensions")?.has("gallery_uri") == true
-        val statusText = if (accepted && exported) {
-            getString(R.string.scan_accepted)
-        } else if (accepted) {
-            // Accepted before the photo-library export existed: locked, but
-            // never claimed to be in the gallery.
-            getString(R.string.scan_locked)
-        } else {
-            getString(
-                R.string.review_status,
-                if (manifest.optBoolean("used_fusion")) {
-                    getString(R.string.review_output_fused)
-                } else {
-                    getString(R.string.review_output_single)
-                },
+        var previewBitmap: Bitmap? = null
+        try {
+            val accepted = manifest.optString("state") == "accepted"
+            val extensions = manifest.optJSONObject("extensions")
+            val outputPath = if (accepted) {
+                extensions?.optString("gallery_source_path")?.takeIf(String::isNotBlank)
+                    ?: manifest.getString("preview_path")
+            } else {
+                manifest.getString("preview_path")
+            }
+            val output = File(root, outputPath)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(output.absolutePath, bounds)
+            val previewOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize(output, 3000) }
+            val decodedPreview = requireNotNull(BitmapFactory.decodeFile(output.absolutePath, previewOptions)) {
+                "Unable to load the finished scan"
+            }
+            previewBitmap = decodedPreview
+            val quadRecord = if (manifest.has("manual_quad")) {
+                manifest.getJSONObject("manual_quad")
+            } else {
+                manifest.getJSONObject("selected_quad")
+            }
+            val selected = quadRecord.getJSONArray("normalized_points")
+            val points = (0 until selected.length()).map { index ->
+                val point = selected.getJSONArray(index)
+                Point(point.getDouble(0), point.getDouble(1))
+            }
+            require(points.size == 4 && points.all { it.x.isFinite() && it.y.isFinite() && it.x in 0.0..1.0 && it.y in 0.0..1.0 }) {
+                "The saved print corners are invalid"
+            }
+            val exported = manifest.optJSONObject("extensions")?.has("gallery_uri") == true
+            val statusText = if (accepted && exported) {
+                getString(R.string.scan_accepted)
+            } else if (accepted) {
+                // Accepted before the photo-library export existed: locked, but
+                // never claimed to be in the gallery.
+                getString(R.string.scan_locked)
+            } else {
+                getString(
+                    R.string.review_status,
+                    if (manifest.optBoolean("used_fusion")) {
+                        getString(R.string.review_output_fused)
+                    } else {
+                        getString(R.string.review_output_single)
+                    },
+                )
+            }
+            return LoadedScan(
+                bitmap,
+                decodedPreview,
+                bounds.outWidth,
+                bounds.outHeight,
+                points,
+                statusText,
+                manifest.optString("state") == "review",
+                activeRecipe(manifest, outputPath),
+                buildList {
+                    if (manifest.has("auto_crop_detected") && !manifest.optBoolean("auto_crop_detected") && !manifest.has("manual_quad")) {
+                        add(getString(if (accepted) R.string.review_uncropped_saved_warning else R.string.review_uncropped_warning))
+                    }
+                    if (!manifest.optBoolean("used_fusion") && manifest.optString("fusion_failure").isNotBlank()) {
+                        add(getString(if (accepted) R.string.review_fusion_saved_warning else R.string.review_fusion_warning))
+                    }
+                }.joinToString("\n\n"),
             )
+        } catch (error: Throwable) {
+            bitmap.recycle()
+            previewBitmap?.recycle()
+            throw error
         }
-        return LoadedScan(
-            bitmap,
-            points,
-            statusText,
-            manifest.optString("state") == "review",
-            activeRecipe(manifest),
-        )
     }
 
     /** The recipe label of the active output, or null when it is unrestored. */
-    private fun activeRecipe(manifest: JSONObject): String? {
-        val preview = manifest.optString("preview_path")
+    private fun activeRecipe(manifest: JSONObject, preview: String): String? {
         val derivatives = manifest.optJSONArray("derivatives") ?: return null
         for (index in derivatives.length() - 1 downTo 0) {
             val entry = derivatives.optJSONObject(index) ?: continue
             if (entry.optString("path") != preview) continue
             if (entry.optString("kind") != "restored") return null
             val recipe = entry.optString("recipe")
-            return RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
+            return restorationLabel(recipe)
         }
         return null
     }
@@ -180,6 +239,7 @@ class ReviewActivity : Activity() {
             },
         )
         status = TextView(this).apply {
+            setText(R.string.loading_scan)
             setTextColor(0xFFD7CFC3.toInt())
             textSize = 13f
             setPadding(0, dp(6), 0, 0)
@@ -187,9 +247,54 @@ class ReviewActivity : Activity() {
         }
         content.addView(status)
 
+        content.addView(sectionHeader(R.string.review_preview_section))
+        scanPreview = ScanPreviewView(this)
+        content.addView(scanPreview, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        content.addView(caption(R.string.review_preview_help))
+        rotateButton = Button(this).apply {
+            setText(R.string.rotate_scan)
+            setOnClickListener {
+                runTask(getString(R.string.rotating_scan), DraftPolicy.RESET) {
+                    DerivativeStore.createRotation(manifestFile).file
+                }
+            }
+            editingControls += this
+        }
+        content.addView(rotateButton)
+        previewDetails = caption(R.string.loading_scan)
+        content.addView(previewDetails)
+        qualityAdvisory = TextView(this).apply {
+            setTextColor(0xFFFFB84D.toInt())
+            textSize = 14f
+            setPadding(0, dp(12), 0, 0)
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        content.addView(qualityAdvisory)
+
+        content.addView(sectionHeader(R.string.review_finish_section))
+        activeOutput = TextView(this).apply {
+            setTextColor(0xFFFFB84D.toInt())
+            textSize = 13f
+            setPadding(0, 0, 0, dp(6))
+            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        content.addView(activeOutput)
+        saveButton = Button(this).apply {
+            setText(R.string.accept_scan)
+            setOnClickListener { saveScan() }
+            editingControls += this
+        }
+        content.addView(saveButton)
+        content.addView(caption(R.string.review_save_caption))
+
         content.addView(sectionHeader(R.string.review_corners_section))
         content.addView(caption(R.string.corner_editor_help))
         cornerEditor = CornerEditorView(this)
+        cornerEditor.onCornersChanged = {
+            setBusy(operationInProgress)
+            status.text = if (hasUnappliedCorners()) getString(R.string.unapplied_corners) else readyStatus
+        }
         content.addView(
             cornerEditor,
             ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
@@ -199,8 +304,9 @@ class ReviewActivity : Activity() {
                 setText(R.string.apply_manual_corners)
                 contentDescription = getString(R.string.apply_manual_corners)
                 setOnClickListener {
+                    val points = cornerEditor.normalizedPoints()
                     runTask(getString(R.string.applying_manual_corners)) {
-                        DerivativeStore.createManualRectification(manifestFile, cornerEditor.normalizedPoints()).file
+                        DerivativeStore.createManualRectification(manifestFile, points).file
                     }
                 }
                 editingControls += this
@@ -240,22 +346,6 @@ class ReviewActivity : Activity() {
         }
         content.addView(revertButton)
 
-        content.addView(sectionHeader(R.string.review_finish_section))
-        activeOutput = TextView(this).apply {
-            setTextColor(0xFFFFB84D.toInt())
-            textSize = 13f
-            setPadding(0, 0, 0, dp(6))
-            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        content.addView(activeOutput)
-        content.addView(
-            Button(this).apply {
-                setText(R.string.accept_scan)
-                setOnClickListener { saveScan() }
-                editingControls += this
-            },
-        )
-        content.addView(caption(R.string.review_save_caption))
         content.addView(
             Button(this).apply {
                 setText(R.string.archival_scale)
@@ -283,18 +373,21 @@ class ReviewActivity : Activity() {
         SystemBars.pad(content, left = true, top = true, right = true, bottom = true, includeIme = true)
     }
 
-    private fun runTask(message: String, operation: () -> File) {
+    private fun runTask(message: String, draftPolicy: DraftPolicy = DraftPolicy.PRESERVE, operation: () -> File) {
+        if (operationInProgress) return
+        val draft = cornerEditor.normalizedPoints()
         status.text = message
-        editingControls.forEach { it.isEnabled = false }
-        cornerEditor.isEnabled = false
+        setBusy(true)
         Thread({
             val result = runCatching(operation)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
-                    onSuccess = { loadScan(getString(R.string.derivative_created, it.name)) },
+                    onSuccess = {
+                        loadScan(getString(R.string.derivative_created, it.name), draft.takeIf { draftPolicy == DraftPolicy.PRESERVE })
+                    },
                     onFailure = {
-                        loadScan(getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName))
+                        loadScan(getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName), draft)
                     },
                 )
             }
@@ -310,6 +403,10 @@ class ReviewActivity : Activity() {
      * the unrestored master takes one tap instead of a revert cycle.
      */
     private fun saveScan() {
+        if (operationInProgress || hasUnappliedCorners()) return
+        val previousStatus = status.text.toString()
+        setBusy(true)
+        status.setText(R.string.loading_save_versions)
         Thread({
             val options = runCatching(::exportChoices)
             runOnUiThread {
@@ -319,11 +416,11 @@ class ReviewActivity : Activity() {
                         if (export.choices.size <= 1) {
                             performSave(export.choices.first())
                         } else {
-                            showSaveChooser(export)
+                            showSaveChooser(export, previousStatus)
                         }
                     },
                     onFailure = {
-                        status.text = getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName)
+                        loadScan(getString(R.string.processing_failed, it.message ?: it.javaClass.simpleName))
                     },
                 )
             }
@@ -351,7 +448,7 @@ class ReviewActivity : Activity() {
                 val label = when (record.optString("kind")) {
                     "restored" -> {
                         val recipe = record.optString("recipe")
-                        val name = RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label ?: recipe
+                        val name = restorationLabel(recipe)
                         getString(R.string.save_version_restored, name)
                     }
                     "acquisition-derived" -> getString(R.string.save_version_rectified)
@@ -370,8 +467,9 @@ class ReviewActivity : Activity() {
         return ExportOptions(choices, activeIndex)
     }
 
-    private fun showSaveChooser(options: ExportOptions) {
+    private fun showSaveChooser(options: ExportOptions, previousStatus: String) {
         var selected = options.activeIndex
+        var saving = false
         AlertDialog.Builder(this)
             .setTitle(R.string.save_version_title)
             .setSingleChoiceItems(
@@ -380,10 +478,23 @@ class ReviewActivity : Activity() {
             ) { _, index ->
                 selected = index
             }
-            .setPositiveButton(R.string.save_version_confirm) { _, _ -> performSave(options.choices[selected]) }
+            .setPositiveButton(R.string.save_version_confirm) { _, _ ->
+                saving = true
+                performSave(options.choices[selected])
+            }
             .setNegativeButton(android.R.string.cancel, null)
+            .setOnDismissListener {
+                if (!saving && !isFinishing && !isDestroyed) {
+                    setBusy(false)
+                    status.text = previousStatus
+                }
+            }
             .show()
     }
+
+    private fun restorationLabel(recipe: String): String =
+        RestorationRecipe.entries.firstOrNull { it.id == recipe }?.label
+            ?: if (recipe == "rotate-clockwise") getString(R.string.rotated_copy) else recipe
 
     /**
      * Finishing a scan runs in fail-closed order: the chosen JPEG goes into
@@ -393,8 +504,7 @@ class ReviewActivity : Activity() {
      */
     private fun performSave(choice: ExportChoice) {
         status.text = getString(R.string.saving_scan)
-        editingControls.forEach { it.isEnabled = false }
-        cornerEditor.isEnabled = false
+        setBusy(true)
         Thread({
             val result = runCatching {
                 val (record, source) = ScanManifestStore.locked {
@@ -452,7 +562,9 @@ class ReviewActivity : Activity() {
                 } ?: error("Could not write to the photo library")
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                contentResolver.update(uri, values, null, null)
+                check(contentResolver.update(uri, values, null, null) == 1) {
+                    "The photo library could not publish the scan"
+                }
             } catch (error: Throwable) {
                 contentResolver.delete(uri, null, null)
                 throw error
@@ -565,8 +677,36 @@ class ReviewActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private fun setBusy(busy: Boolean) {
+        operationInProgress = busy
+        editingControls.forEach { it.isEnabled = !busy && editable }
+        cornerEditor.isEnabled = !busy && editable
+        revertButton.isEnabled = !busy && editable && restoredActive
+        saveButton.isEnabled = !busy && editable && !hasUnappliedCorners()
+        rotateButton.isEnabled = !busy && editable && !hasUnappliedCorners()
+    }
+
+    private fun hasUnappliedCorners(): Boolean {
+        val current = cornerEditor.normalizedPoints()
+        if (appliedPoints.size != current.size) return false
+        return current.zip(appliedPoints).any { (first, second) -> abs(first.x - second.x) > 0.000001 || abs(first.y - second.y) > 0.000001 }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (editable) outState.putDoubleArray(STATE_DRAFT_CORNERS, cornerEditor.normalizedPoints().flatMap { listOf(it.x, it.y) }.toDoubleArray())
+    }
+
+    override fun onDestroy() {
+        ++loadGeneration
+        scanPreview.releaseImage()
+        cornerEditor.releaseImage()
+        super.onDestroy()
+    }
+
     companion object {
         private const val EXTRA_MANIFEST = "scanManifest"
+        private const val STATE_DRAFT_CORNERS = "draftCorners"
         fun intent(context: Context, manifest: File): Intent =
             Intent(context, ReviewActivity::class.java).putExtra(EXTRA_MANIFEST, manifest.absolutePath)
     }

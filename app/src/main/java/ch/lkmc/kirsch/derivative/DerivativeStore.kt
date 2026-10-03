@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import ch.lkmc.kirsch.archival.ScaleAuthority
 import ch.lkmc.kirsch.archival.ScaleMeasurement
 import ch.lkmc.kirsch.geometry.PrintGeometry
+import ch.lkmc.kirsch.geometry.CameraIntrinsics
 import ch.lkmc.kirsch.scan.ScanManifestStore
 import java.io.File
 import java.security.MessageDigest
@@ -14,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import org.json.JSONObject
 import org.opencv.core.CvType
+import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.core.MatOfInt
 import org.opencv.core.Point
@@ -21,6 +23,56 @@ import org.opencv.imgcodecs.Imgcodecs
 
 object DerivativeStore {
     data class Created(val file: File, val manifest: File)
+
+    fun createRotation(scanManifest: File): Created {
+        val root = requireNotNull(scanManifest.parentFile)
+        val snapshot = ScanManifestStore.read(scanManifest)
+        require(snapshot.getString("state") == "review") { "Accepted scans are immutable; start a new revision to edit" }
+        val parent = File(root, snapshot.getString("preview_path"))
+        // The paired TIFF avoids another JPEG decode/re-encode cycle on each
+        // turn. A restored JPEG gets a lossless companion on its first turn.
+        val lossless = File(parent.parentFile, parent.nameWithoutExtension + ".tif")
+        val sourceFile = lossless.takeIf(File::isFile) ?: parent
+        val source = Imgcodecs.imread(sourceFile.absolutePath, Imgcodecs.IMREAD_COLOR)
+        require(!source.empty()) { "Unable to decode rotation source" }
+        val rotated = Mat()
+        val sixteenBit = Mat()
+        val options = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 96)
+        val file = uniqueFile(File(root, "derivatives"), "rotated", ".jpg")
+        val tiff = File(file.parentFile, file.nameWithoutExtension + ".tif")
+        try {
+            Core.rotate(source, rotated, Core.ROTATE_90_CLOCKWISE)
+            rotated.convertTo(sixteenBit, CvType.CV_16UC3, 257.0)
+            writeImageAtomically(file, rotated, options, "Unable to write rotated scan")
+            writeImageAtomically(tiff, sixteenBit, null, "Unable to write rotated TIFF")
+            return ScanManifestStore.locked {
+                val current = JSONObject(scanManifest.readText())
+                require(current.getString("state") == "review" && current.getString("preview_path") == snapshot.getString("preview_path")) {
+                    "Active scan changed while rotating"
+                }
+                val graph = current.getJSONArray("derivatives")
+                val parentKind = (0 until graph.length()).map { graph.getJSONObject(it) }
+                    .lastOrNull { it.optString("path") == snapshot.getString("preview_path") }?.optString("kind")
+                val kind = if (parentKind == "restored") "restored" else "acquisition-derived"
+                setOutputRotation(current, (current.optInt("output_rotation_quarter_turns", 0) + 1) % 4)
+                appendDerivative(current, root, file, kind, "rotate-clockwise", sourceFile)
+                appendDerivative(current, root, tiff, kind, "rotate-clockwise", sourceFile)
+                current.put("preview_path", file.relativeTo(root).invariantSeparatorsPath)
+                rescaleArchivalScale(current, file)
+                ScanManifestStore.write(scanManifest, current)
+                Created(file, scanManifest)
+            }
+        } catch (error: Throwable) {
+            file.delete()
+            tiff.delete()
+            throw error
+        } finally {
+            source.release()
+            rotated.release()
+            sixteenBit.release()
+            options.release()
+        }
+    }
 
     fun createRestoration(scanManifest: File, recipe: RestorationRecipe): Created {
         val parent = ScanManifestStore.locked {
@@ -31,8 +83,11 @@ object DerivativeStore {
         val root = requireNotNull(scanManifest.parentFile)
         val source = Imgcodecs.imread(parent.absolutePath, Imgcodecs.IMREAD_COLOR)
         require(!source.empty()) { "Unable to decode ${parent.name}" }
-        val output = RestorationProcessor.apply(source, recipe)
-        source.release()
+        val output = try {
+            RestorationProcessor.apply(source, recipe)
+        } finally {
+            source.release()
+        }
         val file = uniqueFile(File(root, "derivatives"), "restored-${recipe.id}", ".jpg")
         val options = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 96)
         try {
@@ -79,6 +134,7 @@ object DerivativeStore {
         val root = requireNotNull(scanManifest.parentFile)
         val derivatives = manifest.getJSONArray("derivatives")
         var target: String? = null
+        var targetRotation = 0
         for (index in 0 until derivatives.length()) {
             val entry = derivatives.getJSONObject(index)
             if (entry.optString("kind") == "restored") continue
@@ -89,11 +145,13 @@ object DerivativeStore {
             // do not, so both signals are accepted.
             if (entry.optString("media_type") != "image/jpeg" && !path.endsWith(".jpg")) continue
             target = path
+            targetRotation = entry.optInt("output_rotation_quarter_turns", 0)
         }
         val path = requireNotNull(target) { "This scan has no unrestored copy to return to" }
         val file = File(root, path)
         require(file.isFile) { "The unrestored copy is missing from storage" }
         manifest.put("preview_path", path)
+        setOutputRotation(manifest, targetRotation)
         rescaleArchivalScale(manifest, file)
         ScanManifestStore.write(scanManifest, manifest)
         Created(file, scanManifest)
@@ -139,48 +197,60 @@ object DerivativeStore {
             .put("rescaled_utc", Instant.now().toString())
     }
 
+    private fun setOutputRotation(manifest: JSONObject, quarterTurns: Int) {
+        val previous = manifest.optInt("output_rotation_quarter_turns", 0)
+        if ((previous % 2) != (quarterTurns % 2)) {
+            manifest.optJSONObject("archival_scale")?.let { scale ->
+                val width = scale.optDouble("physical_width_mm", Double.NaN)
+                val height = scale.optDouble("physical_height_mm", Double.NaN)
+                if (width.isFinite() && height.isFinite()) {
+                    scale.put("physical_width_mm", height).put("physical_height_mm", width)
+                }
+            }
+        }
+        manifest.put("output_rotation_quarter_turns", quarterTurns)
+    }
+
     fun createManualRectification(scanManifest: File, normalizedPoints: List<Point>): Created {
         val validatedPoints = PrintGeometry.validateNormalizedQuad(normalizedPoints)
-        val parent = ScanManifestStore.locked {
-            val manifest = JSONObject(scanManifest.readText())
-            require(manifest.getString("state") == "review") { "Accepted scans are immutable; start a new revision to edit" }
-            File(requireNotNull(scanManifest.parentFile), manifest.getString("working_image_path"))
-        }
+        val snapshot = ScanManifestStore.read(scanManifest)
+        require(snapshot.getString("state") == "review") { "Accepted scans are immutable; start a new revision to edit" }
+        val intrinsics = CameraIntrinsics.fromJson(snapshot.optJSONObject("working_intrinsics"))
+        val quarterTurns = snapshot.optInt("output_rotation_quarter_turns", 0)
         val root = requireNotNull(scanManifest.parentFile)
-        val source = Imgcodecs.imread(parent.absolutePath, Imgcodecs.IMREAD_COLOR)
-        require(!source.empty()) { "Unable to decode manual-correction source" }
-        val points = validatedPoints.map { point ->
-            Point(
-                point.x.coerceIn(0.0, 1.0) * source.cols(),
-                point.y.coerceIn(0.0, 1.0) * source.rows(),
-            )
-        }
-        val quad = PrintGeometry.Quad(points, PrintGeometry.polygonArea(points))
-        val rectified = PrintGeometry.rectify(source, quad)
-        source.release()
+        val parent = File(root, snapshot.getString("working_image_path"))
         val file = uniqueFile(File(root, "derivatives"), "manual-rectified", ".jpg")
+        val tiff = File(file.parentFile, file.nameWithoutExtension + ".tif")
+        val source = Imgcodecs.imread(parent.absolutePath, Imgcodecs.IMREAD_COLOR)
+        var rectified: Mat? = null
+        val sixteenBit = Mat()
         val options = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 96)
         try {
-            writeImageAtomically(file, rectified, options, "Manual rectification export failed")
-        } finally {
-            options.release()
-        }
-        val tiff = File(file.parentFile, file.nameWithoutExtension + ".tif")
-        val sixteenBit = Mat()
-        rectified.convertTo(sixteenBit, CvType.CV_16UC3, 257.0)
-        try {
+            require(!source.empty()) { "Unable to decode manual-correction source" }
+            val points = validatedPoints.map { point ->
+                Point(point.x * (source.cols() - 1), point.y * (source.rows() - 1))
+            }
+            val quad = PrintGeometry.Quad(points, PrintGeometry.polygonArea(points))
+            val image = PrintGeometry.rectify(source, quad, intrinsics = intrinsics)
+            rectified = image
+            source.release()
+            val rotation = when (quarterTurns) {
+                1 -> Core.ROTATE_90_CLOCKWISE
+                2 -> Core.ROTATE_180
+                3 -> Core.ROTATE_90_COUNTERCLOCKWISE
+                else -> null
+            }
+            if (rotation != null) Core.rotate(image, image, rotation)
+            writeImageAtomically(file, image, options, "Manual rectification export failed")
+            image.convertTo(sixteenBit, CvType.CV_16UC3, 257.0)
             writeImageAtomically(tiff, sixteenBit, null, "Manual TIFF export failed")
-        } catch (error: Throwable) {
-            file.delete()
-            throw error
-        } finally {
-            sixteenBit.release()
-            rectified.release()
-        }
-        return try {
-            ScanManifestStore.locked {
+            return ScanManifestStore.locked {
                 val current = JSONObject(scanManifest.readText())
-                require(current.getString("state") == "review") { "Scan state changed while processing" }
+                require(current.getString("state") == "review" &&
+                    current.getString("preview_path") == snapshot.getString("preview_path") &&
+                    current.getString("working_image_path") == snapshot.getString("working_image_path") &&
+                    current.optInt("output_rotation_quarter_turns", 0) == quarterTurns
+                ) { "Active scan changed while processing corners" }
                 appendDerivative(current, root, file, "acquisition-derived", "manual-rectification", parent)
                 appendDerivative(current, root, tiff, "acquisition-derived", "manual-rectification", parent)
                 current.put("preview_path", file.relativeTo(root).invariantSeparatorsPath)
@@ -196,6 +266,11 @@ object DerivativeStore {
             file.delete()
             tiff.delete()
             throw error
+        } finally {
+            source.release()
+            rectified?.release()
+            sixteenBit.release()
+            options.release()
         }
     }
 
@@ -237,6 +312,7 @@ object DerivativeStore {
                 .put("path", file.relativeTo(root).invariantSeparatorsPath)
                 .put("kind", kind)
                 .put("recipe", recipe)
+                .put("output_rotation_quarter_turns", manifest.optInt("output_rotation_quarter_turns", 0))
                 .put("created_utc", Instant.now().toString())
                 .put("parent_path", parent.relativeTo(root).invariantSeparatorsPath)
                 .put("parent_sha256", sha256(parent))
@@ -255,24 +331,20 @@ object DerivativeStore {
             destination.parentFile,
             ".${destination.nameWithoutExtension}.${UUID.randomUUID()}.partial.${destination.extension}",
         )
-        val written = if (options == null) {
-            Imgcodecs.imwrite(temporary.absolutePath, image)
-        } else {
-            Imgcodecs.imwrite(temporary.absolutePath, image, options)
-        }
-        if (!written) {
-            temporary.delete()
-            error(errorMessage)
-        }
         try {
-            Files.move(
-                temporary.toPath(),
-                destination.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val written = if (options == null) {
+                Imgcodecs.imwrite(temporary.absolutePath, image)
+            } else {
+                Imgcodecs.imwrite(temporary.absolutePath, image, options)
+            }
+            check(written) { errorMessage }
+            try {
+                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            temporary.delete()
         }
     }
 

@@ -1,7 +1,7 @@
 # Kirsch — Analysis and Open Work
 
 **Origin:** full desk review of commit `f7529e8`, 2026-07-25.
-**Status:** ten findings addressed in PRs #22–#27; the rest is open work.
+**Status:** PRs #22–#27 addressed the initial findings. The 2026-10-03 review and implementation below supersede the older backlog where stated.
 
 This is the living backlog. Items that shipped are recorded in
 [§1](#1-landed) with what changed and where, so nothing is lost; everything
@@ -20,6 +20,55 @@ crash), **[S2]** significant (quality, performance or UX cost a user notices),
 **[S3]** minor (polish, hygiene, latent risk), **[IDEA]** speculative.
 
 ---
+
+## 2026-10-03 quality review
+
+The current review covered acquisition, sweep selection, registration, fusion,
+perspective correction, native memory ownership, review, editing, export, and
+recovery. It found concrete ways the processing could make a photograph worse:
+
+| Problem | Correction and verification |
+|---|---|
+| A long preview shutter is reused while the phone moves | Manual-sensor sweeps target 1/120 s with ISO compensation; preserve brightness at the ISO limit and report the longer-shutter fallback. Pure exposure-policy regressions cover the budget and limit. |
+| Failed AF is counted as a lock; missing lens distance resets focus | Require successful AF and retain triggered focus when distance is unavailable. AF policy regressions observed failing before correction. |
+| Decimated sharpness misses native detail; sustained blur resets the gate | Measure native-resolution patches and preserve the best sweep score. Fine-detail and sustained-blur regressions observed failing before correction. |
+| Five clock-spaced views discard directional diversity | Capture measured positions; retain the origin and directional extrema with displacement-based fill. Directional-selection regressions observed failing before correction. |
+| Middle-frame reference can be blurred | Use measured sharpness for reference and fallback, reject substantially blurred views. Native OpenCV regression observed failing before correction. |
+| Sensor exposure multiplication clips already rendered YUV | Estimate bounded brightness adjustment from corresponding rendered samples. Native exposure regression observed failing before correction. |
+| Equal-luma colors blend into ghosts | Require color agreement and report actual contributors in confidence. Native pixel regression observed failing before correction. |
+| Localized matches or border interpolation contaminate fusion | Reject unsafe homography support/geometry and exclude partially interpolated borders. Native registration tests cover localized matches and known shifts. |
+| Single-axis tilt stretches a print | Record sensor geometry, account for capture crop, and preserve calibrated shape in automatic and manual rectification. Synthetic 35° pitch/yaw geometry regression observed failing before correction. |
+| Review never shows the deliverable | Show the actual active or exported version with zoom and dimensions, explain fallback, and retain crop drafts. Native UI tests check actual rendered pixels and screen recreation. |
+| Sideways photos cannot be corrected | Add reversible rotation with lossless companions; preserve orientation through crop and physical-scale metadata. Native processing/UI tests cover dimensions and visible results. |
+| Failed processing has no recovery action | Expose retained failed scans for retry and rebind listeners after screen recreation. Original capture files stay intact. |
+
+The native moving-glare comparator uses known shifts on a synthetic textured
+color image. Its gates require mean RGB error below two code values and more
+than 70% reduction of the reference frame's glare error. These are regression
+gates, not measured performance on real prints. No physical phone is connected
+in this review environment.
+
+The following remain necessary before calling Kirsch a proven camera-quality
+replacement:
+
+- Capture the same glossy and matte prints with Kirsch, the stock camera, and
+  PhotoScan on supported device classes. Compare glare, detail, color, shape,
+  latency, memory, thermal behavior, and failed sweeps against flatbed references.
+- Profile full-resolution sweeps on phones with and without manual sensor
+  support. Emulator tests cannot verify vendor AF, shutter response, optical
+  calibration, or motion blur.
+- Curled prints still use one global homography; local registration refinement
+  and tiled processing for more views need separate quality and memory evidence.
+- Automatic boundary detection can mistake picture content or table edges for
+  the print. Review now makes the result inspectable, but detector confidence
+  and difficult backgrounds need a physical dataset.
+- Large archives still need storage management, scan naming, a visual library,
+  continuous capture, and full-resolution tiled inspection. RAW development,
+  learned restoration, and other capability gates remain unchanged.
+
+Older entries below are retained as review history. In particular, §§2.1, 2.2,
+2.4, 2.5, 6.4, and 6.8 are now fully or partly addressed as described above;
+they should not be read as descriptions of the new implementation.
 
 ## Table of contents
 
