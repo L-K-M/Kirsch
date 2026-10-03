@@ -49,3 +49,44 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  imaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 emulator system-images;android-35;google_apis;x86_64
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Run native imaging and scan pipeline regressions
+        run: |
+          echo no | avdmanager create avd --force --name kirsch-test --package 'system-images;android-35;google_apis;x86_64'
+          "$ANDROID_HOME/emulator/emulator" -avd kirsch-test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb wait-for-device
+          booted=false
+          for attempt in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then
+              booted=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$booted" != true ]; then
+            cat "$RUNNER_TEMP/emulator.log"
+            exit 1
+          fi
+          adb shell input keyevent 82
+          ./gradlew connectedDebugAndroidTest
+      - name: Upload native test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: imaging-test-reports
+          path: app/build/reports/androidTests
