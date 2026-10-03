@@ -112,7 +112,10 @@ class ReviewActivity : Activity() {
                         editable = scan.editable
                         restoredActive = scan.restoredLabel != null
                         setBusy(false)
-                        if (editable && hasUnappliedCorners()) status.setText(R.string.unapplied_corners)
+                        if (editable && hasUnappliedCorners()) {
+                            val guidance = getString(R.string.unapplied_corners)
+                            status.text = if (statusOverride == null) guidance else "$statusOverride\n$guidance"
+                        }
                         // What "SAVE TO PHOTOS" will actually export.
                         // Enhancements replace the active output, so the user
                         // needs to see which one is live.
@@ -305,7 +308,7 @@ class ReviewActivity : Activity() {
                 contentDescription = getString(R.string.apply_manual_corners)
                 setOnClickListener {
                     val points = cornerEditor.normalizedPoints()
-                    runTask(getString(R.string.applying_manual_corners)) {
+                    runTask(getString(R.string.applying_manual_corners), DraftPolicy.RESET) {
                         DerivativeStore.createManualRectification(manifestFile, points).file
                     }
                 }

@@ -16,6 +16,7 @@ import android.widget.TextView
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
+import org.opencv.core.Point
 
 /** Exercises the actual decoded preview, not only the manifest selection rule. */
 @Suppress("DEPRECATION")
@@ -170,6 +171,86 @@ class ReviewActivityTest : InstrumentationTestCase() {
             assertTrue(save.isEnabled)
         }
         assertEquals("review", JSONObject(File(directory, "scan.json").readText()).getString("state"))
+    }
+
+    fun testApplyingReorderedCornersClearsTheDraftAndEnablesSaving() {
+        openScan(createScan("review"))
+        instrumentation.runOnMainSync {
+            val root = requireNotNull(activity).window.decorView
+            val editor = requireNotNull(findView(root, CornerEditorView::class.java))
+            // Handles can exchange identities during correction. The processor
+            // orders their boundary before it stores the applied result.
+            editor.setNormalizedPoints(listOf(
+                Point(0.95, 0.05), Point(0.05, 0.05), Point(0.95, 0.95), Point(0.05, 0.95),
+            ))
+            editor.onCornersChanged?.invoke()
+            val save = descendants(root).filterIsInstance<Button>()
+                .single { it.text == instrumentation.targetContext.getString(R.string.accept_scan) }
+            assertFalse(save.isEnabled)
+            descendants(root).filterIsInstance<Button>()
+                .single { it.text == instrumentation.targetContext.getString(R.string.apply_manual_corners) }
+                .performClick()
+        }
+        val deadline = System.nanoTime() + 10_000_000_000L
+        var applied = false
+        while (!applied && System.nanoTime() < deadline) {
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val apply = descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
+                    .single { it.text == instrumentation.targetContext.getString(R.string.apply_manual_corners) }
+                applied = apply.isEnabled && JSONObject(File(directory, "scan.json").readText()).has("manual_quad")
+            }
+            if (!applied) Thread.sleep(50)
+        }
+        assertTrue("Corner correction should finish", applied)
+        instrumentation.runOnMainSync {
+            val root = requireNotNull(activity).window.decorView
+            val save = descendants(root).filterIsInstance<Button>()
+                .single { it.text == instrumentation.targetContext.getString(R.string.accept_scan) }
+            assertTrue("Successfully applied corners should enable saving", save.isEnabled)
+            val editor = requireNotNull(findView(root, CornerEditorView::class.java))
+            assertEquals(0.05, editor.normalizedPoints().first().x, 0.000001)
+        }
+    }
+
+    fun testFailedCornerApplicationKeepsTheDraftForCorrection() {
+        openScan(createScan("review"))
+        val draft = listOf(Point(0.1, 0.1), Point(0.1, 0.1), Point(0.9, 0.9), Point(0.1, 0.9))
+        instrumentation.runOnMainSync {
+            val root = requireNotNull(activity).window.decorView
+            val editor = requireNotNull(findView(root, CornerEditorView::class.java))
+            editor.setNormalizedPoints(draft)
+            editor.onCornersChanged?.invoke()
+            descendants(root).filterIsInstance<Button>()
+                .single { it.text == instrumentation.targetContext.getString(R.string.apply_manual_corners) }
+                .performClick()
+        }
+        val deadline = System.nanoTime() + 10_000_000_000L
+        var completed = false
+        while (!completed && System.nanoTime() < deadline) {
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                completed = descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
+                    .single { it.text == instrumentation.targetContext.getString(R.string.apply_manual_corners) }.isEnabled
+            }
+            if (!completed) Thread.sleep(50)
+        }
+        assertTrue("Rejected correction should return to review", completed)
+        var messages = emptyList<String>()
+        instrumentation.runOnMainSync {
+            val root = requireNotNull(activity).window.decorView
+            val editor = requireNotNull(findView(root, CornerEditorView::class.java))
+            assertEquals(draft, editor.normalizedPoints())
+            val save = descendants(root).filterIsInstance<Button>()
+                .single { it.text == instrumentation.targetContext.getString(R.string.accept_scan) }
+            assertFalse(save.isEnabled)
+            messages = descendants(root).filterIsInstance<TextView>().map { it.text.toString() }
+        }
+        assertTrue("The rejected corner reason should remain visible", messages.any { it.contains("Print corners must be distinct") })
+        assertTrue("The draft should explain how to apply a correction", messages.any {
+            it.contains(instrumentation.targetContext.getString(R.string.unapplied_corners))
+        })
+        assertFalse(JSONObject(File(directory, "scan.json").readText()).has("manual_quad"))
     }
 
     private fun createScan(state: String): File {

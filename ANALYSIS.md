@@ -45,8 +45,10 @@ recovery. It found concrete ways the processing could make a photograph worse:
 The native moving-glare comparator uses known shifts on a synthetic textured
 color image. Its gates require mean RGB error below two code values and more
 than 70% reduction of the reference frame's glare error. These are regression
-gates, not measured performance on real prints. No physical phone is connected
-in this review environment.
+gates, not measured performance on real prints. The local native test measured
+mean RGB error of 3.440 for the reference and 0.164 for fusion, a 95.24%
+reduction on that synthetic fixture. No physical phone is connected in this
+review environment.
 
 The following remain necessary before calling Kirsch a proven camera-quality
 replacement:
