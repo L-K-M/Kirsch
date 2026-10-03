@@ -7,6 +7,20 @@ import org.junit.Test
 
 class ThreeAStatePolicyTest {
     @Test
+    fun failedAutoFocusDoesNotAuthorizeCapture() {
+        assertFalse(
+            ThreeAStatePolicy.locked(
+                CaptureResult.CONTROL_AE_STATE_LOCKED,
+                CaptureResult.CONTROL_AWB_STATE_LOCKED,
+                CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+                aeLockRequired = true,
+                awbLockRequired = true,
+                focusLockRequired = true,
+            ),
+        )
+    }
+
+    @Test
     fun previewRequiresConvergedAeAwbAndFocus() {
         assertTrue(
             ThreeAStatePolicy.previewConverged(

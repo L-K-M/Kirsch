@@ -6,6 +6,8 @@ plugins {
 android {
     namespace = "ch.lkmc.kirsch"
     compileSdk = 35
+    useLibrary("android.test.runner")
+    useLibrary("android.test.base")
 
     defaultConfig {
         applicationId = "ch.lkmc.kirsch"
@@ -14,7 +16,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        testInstrumentationRunner = "android.app.Instrumentation"
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
     buildTypes {
