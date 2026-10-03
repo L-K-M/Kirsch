@@ -40,6 +40,41 @@ class ScanPipelineTest : InstrumentationTestCase() {
         }
     }
 
+    fun testAcceptingOlderVersionRestoresItsRotationAndPhysicalScale() {
+        val context = instrumentation.targetContext
+        val directory = File(context.cacheDir, "saved-version-test-${UUID.randomUUID()}").apply { mkdirs() }
+        val master = File(directory, "acquisition-master.jpg")
+        val source = Mat(64, 96, CvType.CV_8UC3, Scalar(40.0, 100.0, 170.0))
+        try {
+            check(Imgcodecs.imwrite(master.absolutePath, source))
+            val manifest = File(directory, "scan.json").apply {
+                writeText(JSONObject().put("state", "review").put("preview_path", master.name)
+                    .put("derivatives", JSONArray().put(record(master, "acquisition-master")
+                        .put("kind", "acquisition-master").put("media_type", "image/jpeg"))).toString())
+            }
+            ArchivalMetadataStore.record(manifest, 150.0, 100.0, ScaleAuthority.CONFIRMED_DIMENSIONS, null)
+            DerivativeStore.createRotation(manifest)
+            assertEquals(100.0, ScanManifestStore.read(manifest).getJSONObject("archival_scale").getDouble("physical_width_mm"))
+
+            DerivativeStore.accept(manifest, "content://saved-master", master.name)
+
+            val accepted = ScanManifestStore.read(manifest)
+            val scale = accepted.getJSONObject("archival_scale")
+            assertEquals(150.0, scale.getDouble("physical_width_mm"))
+            assertEquals(100.0, scale.getDouble("physical_height_mm"))
+            assertEquals(96, scale.getInt("pixel_width"))
+            assertEquals(64, scale.getInt("pixel_height"))
+            assertEquals(96 * 25.4 / 150.0, scale.getDouble("sampling_frequency_ppi_x"), 1e-6)
+            assertEquals(64 * 25.4 / 100.0, scale.getDouble("sampling_frequency_ppi_y"), 1e-6)
+            assertEquals(master.name, accepted.getString("preview_path"))
+            assertEquals(0, accepted.getInt("output_rotation_quarter_turns"))
+            assertEquals(master.name, accepted.getJSONObject("extensions").getString("gallery_source_path"))
+        } finally {
+            source.release()
+            directory.deleteRecursively()
+        }
+    }
+
     fun testSingleFrameProcessingAndManualReviewRetainGeometryAndSources() {
         val context = instrumentation.targetContext
         val captureId = "capture-test-${UUID.randomUUID()}"

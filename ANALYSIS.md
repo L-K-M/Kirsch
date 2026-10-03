@@ -40,6 +40,7 @@ recovery. It found concrete ways the processing could make a photograph worse:
 | Single-axis tilt stretches a print | Record sensor geometry, account for capture crop, and preserve calibrated shape in automatic and manual rectification. Synthetic 35° pitch/yaw geometry regression observed failing before correction. |
 | Review never shows the deliverable | Show the actual active or exported version with zoom and dimensions, explain fallback, and retain crop drafts. Native UI tests check actual rendered pixels and screen recreation. |
 | Sideways photos cannot be corrected | Add reversible rotation with lossless companions; preserve orientation through crop and physical-scale metadata. Native processing/UI tests cover dimensions and visible results. |
+| Saving an older version keeps the current version's orientation and scale | Accept the selected image as the active output and derive its sampling frequency from its dimensions. Native regression observed the rotated physical width before correction. |
 | Failed processing has no recovery action | Expose retained failed scans for retry and rebind listeners after screen recreation. Original capture files stay intact. |
 
 The native moving-glare comparator uses known shifts on a synthetic textured

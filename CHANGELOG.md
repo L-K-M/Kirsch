@@ -7,6 +7,7 @@
 - Correct calibrated print shape at single-axis tilt and preserve full-frame pixels.
 - Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
 - Offer failed-scan retry and guard editing and photo-library publication.
+- Keep accepted orientation and physical scale consistent with the saved version.
 - Run native OpenCV and review-flow regressions on an Android emulator in CI.
 
 Physical glossy-print comparisons against the stock camera and PhotoScan remain

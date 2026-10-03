@@ -278,8 +278,9 @@ object DerivativeStore {
      * Accepts (locks) a scan, optionally recording the photo-library export
      * in the same atomic manifest transaction: the state re-check, the state
      * flip, and the export record land together or not at all.
-     * [gallerySourcePath] records which derivative (relative to the scan
-     * root) was exported, so provenance survives the user's version choice.
+     * [gallerySourcePath] selects the accepted derivative (relative to the
+     * scan root), so its orientation and physical scale describe the image
+     * the user actually saved.
      */
     fun accept(
         scanManifest: File,
@@ -288,6 +289,24 @@ object DerivativeStore {
     ) = ScanManifestStore.locked {
         val manifest = JSONObject(scanManifest.readText())
         require(manifest.getString("state") == "review") { "Only a scan in review can be accepted" }
+        if (gallerySourcePath != null) {
+            val root = requireNotNull(scanManifest.parentFile).canonicalFile
+            val graph = manifest.getJSONArray("derivatives")
+            val selected = (0 until graph.length()).map { graph.getJSONObject(it) }
+                .lastOrNull { it.optString("path") == gallerySourcePath }
+            require(selected != null &&
+                (selected.optString("media_type") == "image/jpeg" || gallerySourcePath.endsWith(".jpg"))
+            ) { "The selected output is not a scan image" }
+            val file = File(root, gallerySourcePath).canonicalFile
+            require(file.toPath().startsWith(root.toPath()) && file.isFile) {
+                "The selected output is missing from scan storage"
+            }
+            val rotation = selected.optInt("output_rotation_quarter_turns", 0)
+            require(rotation in 0..3) { "The selected output has an invalid orientation" }
+            setOutputRotation(manifest, rotation)
+            manifest.put("preview_path", gallerySourcePath)
+            rescaleArchivalScale(manifest, file)
+        }
         manifest.put("state", "accepted").put("accepted_utc", Instant.now().toString())
         if (galleryUri != null) {
             val extensions = manifest.optJSONObject("extensions") ?: JSONObject()
