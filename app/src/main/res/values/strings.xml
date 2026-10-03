@@ -43,8 +43,28 @@
 
     <!-- Review screen -->
     <string name="review_title">Review scan</string>
+    <string name="review_preview_section">YOUR SCAN</string>
+    <string name="scan_preview_description">Finished scan. Double tap to zoom, pinch to inspect detail, or activate to toggle zoom.</string>
+    <string name="review_preview_help">This is the image you save. Pinch or double tap to inspect detail.</string>
+    <string name="review_preview_dimensions">%1$d × %2$d pixels</string>
+    <string name="rotate_scan">ROTATE 90°</string>
+    <string name="rotating_scan">Rotating your scan…</string>
+    <string name="rotated_copy">Rotated scan</string>
+    <string name="review_uncropped_warning">The print edges were not detected. Adjust all four corners below and apply them before saving.</string>
+    <string name="review_uncropped_saved_warning">The print edges were not detected. This saved version includes the camera frame.</string>
+    <string name="review_fusion_warning">Glare removal could not combine the views. Your sharpest captured photo was kept. Check for reflections before saving.</string>
+    <string name="review_fusion_saved_warning">Glare removal could not combine the views. This saved version uses one captured photo.</string>
+    <string name="loading_scan">Loading your scan…</string>
+    <string name="review_load_failed">Could not show the finished scan: %1$s. Reopen it from Scans to try again.</string>
+    <string name="loading_save_versions">Loading saved versions…</string>
+    <string name="scan_state_failed">processing failed, tap to retry</string>
+    <string name="retry_scan_title">Retry processing?</string>
+    <string name="retry_scan_message">Your captured photos are retained. Kirsch can try processing them again.\n\n%1$s</string>
+    <string name="retry_scan_confirm">Retry</string>
+    <string name="retry_scan_source_missing">The capture needed to retry is missing from storage</string>
+    <string name="library_failed">Could not load your scans: %1$s</string>
     <string name="review_status">%1$s — adjust the corners if needed, then save</string>
-    <string name="review_output_fused">Glare-reduced scan ready</string>
+    <string name="review_output_fused">Multi-view scan ready</string>
     <string name="review_output_single">Single-frame scan ready (fusion was not possible)</string>
     <string name="review_corners_section">PRINT CORNERS</string>
     <string name="corner_editor_help">Drag a handle to its print corner — a magnifier shows the exact spot while you drag.</string>
@@ -52,6 +72,7 @@
     <string name="corner_editor_description">Manual print corner editor with four draggable handles</string>
     <string name="apply_manual_corners">APPLY CORNERS</string>
     <string name="applying_manual_corners">Applying corner correction…</string>
+    <string name="unapplied_corners">Your corner changes are not applied yet. Tap APPLY CORNERS to update the scan before saving.</string>
     <string name="review_enhance_section">ENHANCE (OPTIONAL)</string>
     <string name="review_enhance_caption">Each enhancement is saved as a new copy and becomes the scan you save. The original is always kept and you can go back to it.</string>
     <string name="revert_to_unrestored">USE ORIGINAL SCAN</string>

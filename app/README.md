@@ -15,7 +15,7 @@ The ring is driven only by measured camera motion (subsampled phase correlation 
 - **RAW acquisition only** records a nine-frame DNG package when supported and falls back to YUV otherwise. RAW packages are retained but are not converted into product derivatives because Phase 0 did not verify a DNG demosaic, black-level, or color pipeline.
 - **Quick single frame** records one YUV frame and uses the same review/export path without claiming glare reduction.
 
-The controller prefers AWB lock over replaying result-reported gains, fixes the HMD Fusion manual-AE lock wait, records actual per-frame metadata, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. Sweep packages record the deliverable frame count as `requested_frame_count`, fixed at the moment the sweep stops.
+The controller prefers AWB lock over replaying result-reported gains, waits for successful focus, retains the lens lock when focus-distance metadata is missing, and limits RAW/YUV capture sizes to a 12–16 MP processing envelope. On manual-sensor devices, moving sweeps target a shutter time of 1/120 second while compensating with ISO and preserving post-RAW sensitivity boost. When the available ISO cannot preserve brightness at that shutter time, the controller lengthens exposure and records a low-light warning. Devices without manual sensor control retain automatic exposure. Full-resolution patch sharpness rejects sustained blur. Kept frames record accumulated sweep position, analysis width, and sharpness. Sweep packages record the deliverable frame count as `requested_frame_count`, fixed at the moment the sweep stops.
 
 If a kept view is evicted before its `CaptureResult` arrives — the reader holds only six full-resolution buffers, so a slow write path can exhaust them — the loss is recorded as a warning and the deliverable count follows it down. A sweep degrades to a shorter stack rather than failing the whole capture, and the shortfall is visible in the manifest as the gap between `extensions.warnings` and the kept count.
 
@@ -24,18 +24,19 @@ If a kept view is evicted before its `CaptureResult` arrives — the reader hold
 Accepted YUV acquisitions enter a process-death-recoverable single-worker queue. Processing:
 
 1. verifies every selected payload and metadata file against its recorded byte count and SHA-256
-2. selects up to five evenly spaced frames from the acquisition to bound native memory (sweep keeps are already displacement-spaced)
-3. normalizes by exposure-time × sensitivity where metadata permits
-4. registers frames to the middle observation with ORB and MAGSAC++ homographies
-5. rejects weak registration and falls back visibly to the best single frame
-6. applies conservative glare-aware temporal selection, averages the views that
-   agree with the selected one, and emits confidence/failure maps
-7. detects print quadrilaterals, rectifies the largest candidate, and always permits manual correction
-8. writes a high-quality JPEG and a 16-bit TIFF container
+2. selects up to five views covering the origin and directional extrema, then fills by displacement diversity; older packages without sweep positions retain time-spaced selection
+3. selects the sharpest measured frame as reference and rejects substantially blurred views
+4. registers views with ORB and MAGSAC++ homographies, rejecting localized matches, implausible geometry, and excessive reprojection error
+5. matches rendered brightness from robust corresponding pixels; sensor exposure products remain evidence, rather than being multiplied into already tone-mapped YUV pixels
+6. applies conservative glare-aware temporal selection and averages only views that agree in both brightness and color; confidence counts actual contributors and validity excludes interpolation across image borders
+7. detects print quadrilaterals and rectifies the largest candidate using recorded camera geometry where available, including single-axis tilt; manual correction uses the same calibration
+8. writes a high-quality JPEG and a 16-bit TIFF container, with native allocations released on processing failures
 
 The TIFF records its source bit depth separately. An 8-bit YUV acquisition stored in a 16-bit container is not represented as a 16-bit capture.
 
 ## Review And Derivatives
+
+Review first shows the actual processed output, with pinch and double-tap zoom and its pixel dimensions. It explains automatic-crop failure and single-frame fallback. Accepted scans reopen the version actually saved. Failed processing appears in the library with a retry action using the retained capture.
 
 The review screen provides draggable print corners (with a magnifier loupe while dragging, and a grab radius so stray taps cannot move a corner), optional archival physical-scale metadata, and explicit restored derivatives:
 
@@ -43,6 +44,10 @@ The review screen provides draggable print corners (with a magnifier loupe while
 - dust/scratch removal
 - fade correction
 - classical 2× upscaling
+
+Corner drafts survive screen recreation. Save, rotation, and restoration wait until changed corners are applied, so the displayed draft cannot be silently discarded. Rotate clockwise creates a new JPEG and lossless TIFF companion; later cropping preserves that orientation, and repeated turns use the lossless companion. Confirmed physical dimensions swap with the output axes.
+
+Live edits and saves survive screen recreation without reopening controls early. The replacement screen reloads the committed image before becoming editable, and failed edits preserve the corner draft. Returning to a previously open review also refreshes the saved version. Gallery export uses application context and leaves the source derivative unchanged.
 
 Restorations never overwrite the acquisition-derived master: each is written as a new file and appended to the derivative graph. Creating one does make it the scan's *active* output, so review and **Save to Photos** show what was asked for; **Use original scan** returns the active output to the newest unrestored copy without deleting anything. Every derivative records its recipe, parent path/hash, output hash, and creation time. Accepted scan revisions are immutable.
 
@@ -79,6 +84,7 @@ Storage Access Framework export (Settings → Export packages) places paired sou
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug lintDebug
+./gradlew connectedDebugAndroidTest # running emulator or connected device
 ```
 
 To build and install the debug APK on a phone connected over adb in one step:
@@ -95,3 +101,5 @@ Exported scan graphs can be checked without OpenCV:
 ```bash
 python3 benchmark/tools/kirsch_benchmark.py validate-scan /path/to/scan.json
 ```
+
+Native emulator tests exercise the actual OpenCV registration/fusion pipeline, I420 processing, manual cropping, rotation, visible review pixels, crop drafts, and save-chooser state. CI runs these tests separately from JVM policies. Synthetic moving-glare tests are regression evidence; they do not establish superior quality on physical glossy prints. Use the benchmark capture protocol to compare current Kirsch, the phone camera, and PhotoScan under matched lighting and framing.
