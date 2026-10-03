@@ -73,14 +73,12 @@ jobs:
           # PR with a zai-review:full / zai-review:hybrid / zai-review:incremental
           # label, applied before the push that triggers the next review.
           ZAI_REVIEW_MODE: hybrid
-          # Left at the action's own default. Raising it to cut the request
-          # count backfires: at 25000, three of Seance PR #89's 17 chunks spent the
-          # whole 32768-token output budget on reasoning and returned no review
-          # at all (finish reason "length", 116k to 123k reasoning characters),
-          # and each of those cost a wasted request plus the two smaller ones
-          # the action then retries with. Bigger chunks would hit that more
-          # often, not less.
-          MAX_CHUNK_CHARS: 25000
+          # Kirsch PR #40 exhausted the response budget on three large chunks
+          # and one 12500-character retry, wasting 46 minutes before splitting
+          # again. All observed hard-chunk responses at the next split size
+          # completed. Start there while retaining the full patch coverage,
+          # model settings, and review budget. Runtime remains provider-dependent.
+          MAX_CHUNK_CHARS: 6250
           ZAI_REVIEWER_NAME: GLM 5.3 Code Review
           GITHUB_TOKEN: ${{ github.token }}
 
