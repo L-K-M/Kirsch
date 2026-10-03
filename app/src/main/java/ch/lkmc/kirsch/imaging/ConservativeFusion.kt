@@ -3,6 +3,7 @@ package ch.lkmc.kirsch.imaging
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.min
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -46,6 +47,8 @@ object ConservativeFusion {
      * through the agreement window.
      */
     const val AGREEMENT_TOLERANCE = 10
+
+    private const val COLOR_AGREEMENT_TOLERANCE = 16
 
     /**
      * Anchors on a sample and returns the run of samples that agree with it.
@@ -98,9 +101,12 @@ object ConservativeFusion {
         contributingFrameCount: Int = images.size,
     ): Result {
         require(images.isNotEmpty() && images.size == masks.size)
+        require(referenceIndex in images.indices)
         val height = images[0].rows()
         val width = images[0].cols()
         require(images.all { it.rows() == height && it.cols() == width && it.type() == CvType.CV_8UC3 })
+        require(height > 0 && width > 0)
+        require(masks.all { it.rows() == height && it.cols() == width && it.type() == CvType.CV_8UC1 })
         val confidenceDivisor = contributingFrameCount.coerceIn(1, images.size)
         val output = Mat(height, width, CvType.CV_8UC3)
         val confidence = Mat(height, width, CvType.CV_8UC1)
@@ -111,55 +117,62 @@ object ConservativeFusion {
         // rows are plain native copies with no shared state, and Future.get
         // provides the happens-before edge for the workers' writes.
         val workers = min(height, maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
-        if (workers <= 1) {
-            fuseRows(images, masks, referenceIndex, 0, height, width, confidenceDivisor, output, confidence, failure)
-        } else {
-            val executor = Executors.newFixedThreadPool(workers)
-            try {
-                val bandRows = (height + workers - 1) / workers
-                val bands = (0 until workers).mapNotNull { band ->
-                    val rowStart = band * bandRows
-                    val rowEnd = min(height, rowStart + bandRows)
-                    if (rowStart >= rowEnd) {
-                        null
-                    } else {
-                        executor.submit {
-                            fuseRows(images, masks, referenceIndex, rowStart, rowEnd, width, confidenceDivisor, output, confidence, failure)
+        try {
+            if (workers <= 1) {
+                fuseRows(images, masks, referenceIndex, 0, height, width, confidenceDivisor, output, confidence, failure)
+            } else {
+                val executor = Executors.newFixedThreadPool(workers)
+                try {
+                    val bandRows = (height + workers - 1) / workers
+                    val bands = (0 until workers).mapNotNull { band ->
+                        val rowStart = band * bandRows
+                        val rowEnd = min(height, rowStart + bandRows)
+                        if (rowStart >= rowEnd) {
+                            null
+                        } else {
+                            executor.submit {
+                                fuseRows(images, masks, referenceIndex, rowStart, rowEnd, width, confidenceDivisor, output, confidence, failure)
+                            }
                         }
                     }
-                }
-                try {
-                    bands.forEach { band -> band.get() }
-                } catch (error: ExecutionException) {
-                    // Best-effort cancellation: the row loops are
-                    // compute-bound native calls, so interruption may not
-                    // stop bands that already started; the first failure is
-                    // what the caller reports either way.
-                    executor.shutdownNow()
-                    throw error.cause ?: error
-                } catch (interrupted: InterruptedException) {
-                    executor.shutdownNow()
-                    Thread.currentThread().interrupt()
-                    throw interrupted
-                }
-            } finally {
-                executor.shutdown()
-                // On success every future was already awaited, so this
-                // returns immediately. After a failure it blocks until the
-                // surviving bands stop, guaranteeing no worker touches the
-                // output Mats once fuse() unwinds.
-                var interrupted = false
-                while (!executor.isTerminated) {
                     try {
-                        executor.awaitTermination(1, TimeUnit.SECONDS)
-                    } catch (_: InterruptedException) {
-                        interrupted = true
+                        bands.forEach { band -> band.get() }
+                    } catch (error: ExecutionException) {
+                        // Best-effort cancellation: the row loops are
+                        // compute-bound native calls, so interruption may not
+                        // stop bands that already started; the first failure is
+                        // what the caller reports either way.
+                        executor.shutdownNow()
+                        throw error.cause ?: error
+                    } catch (interrupted: InterruptedException) {
+                        executor.shutdownNow()
+                        Thread.currentThread().interrupt()
+                        throw interrupted
                     }
+                } finally {
+                    executor.shutdown()
+                    // On success every future was already awaited, so this
+                    // returns immediately. After a failure it blocks until the
+                    // surviving bands stop, guaranteeing no worker touches the
+                    // output Mats once fuse() unwinds.
+                    var interrupted = false
+                    while (!executor.isTerminated) {
+                        try {
+                            executor.awaitTermination(1, TimeUnit.SECONDS)
+                        } catch (_: InterruptedException) {
+                            interrupted = true
+                        }
+                    }
+                    if (interrupted) Thread.currentThread().interrupt()
                 }
-                if (interrupted) Thread.currentThread().interrupt()
             }
+            return Result(output, confidence, failure)
+        } catch (error: Throwable) {
+            output.release()
+            confidence.release()
+            failure.release()
+            throw error
         }
-        return Result(output, confidence, failure)
     }
 
     private fun fuseRows(
@@ -214,28 +227,42 @@ object ConservativeFusion {
                 var allSaturated = validCount > 0
                 for (index in 0 until validCount) allSaturated = allSaturated && sampleLumas[index] >= 250
                 val selection = select(sampleLumas, validCount)
+                var contributors = 0
                 if (selection.size == 0) {
                     outputRow[sourceOffset] = imageRows[referenceIndex][sourceOffset]
                     outputRow[sourceOffset + 1] = imageRows[referenceIndex][sourceOffset + 1]
                     outputRow[sourceOffset + 2] = imageRows[referenceIndex][sourceOffset + 2]
                 } else {
+                    // Prefer the unwarped reference when it agrees with the
+                    // glare anchor in luma. Equal luma alone cannot establish
+                    // color agreement at a shifted colored edge.
+                    val referenceSelected = (selection.first until selection.lastExclusive).any {
+                        sampleIndices[it] == referenceIndex
+                    }
+                    val colorAnchor = imageRows[
+                        if (referenceSelected) referenceIndex else sampleIndices[selection.anchor]
+                    ]
                     var sumB = 0
                     var sumG = 0
                     var sumR = 0
                     for (position in selection.first until selection.lastExclusive) {
                         val source = imageRows[sampleIndices[position]]
+                        if ((0..2).any { channel ->
+                                abs((source[sourceOffset + channel].toInt() and 0xff) -
+                                    (colorAnchor[sourceOffset + channel].toInt() and 0xff)) > COLOR_AGREEMENT_TOLERANCE
+                            }) continue
+                        contributors++
                         sumB += source[sourceOffset].toInt() and 0xff
                         sumG += source[sourceOffset + 1].toInt() and 0xff
                         sumR += source[sourceOffset + 2].toInt() and 0xff
                     }
-                    val contributors = selection.size
                     val rounding = contributors / 2
                     outputRow[sourceOffset] = ((sumB + rounding) / contributors).toByte()
                     outputRow[sourceOffset + 1] = ((sumG + rounding) / contributors).toByte()
                     outputRow[sourceOffset + 2] = ((sumR + rounding) / contributors).toByte()
                 }
-                confidenceRow[column] = minOf(255, validCount * 255 / confidenceDivisor).toByte()
-                failureRow[column] = if (validCount < 3 || allSaturated) 0xff.toByte() else 0
+                confidenceRow[column] = minOf(255, contributors * 255 / confidenceDivisor).toByte()
+                failureRow[column] = if (validCount < 3 || contributors < 2 || allSaturated) 0xff.toByte() else 0
             }
             output.put(row, 0, outputRow)
             confidence.put(row, 0, confidenceRow)
