@@ -932,15 +932,17 @@ class Camera2BurstController(
             val exposureRange = selected.characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
             val sensitivityRange = selected.characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
             if (requestedProfile.sweep && exposureRange != null && sensitivityRange != null) {
+                val sceneFlicker = locked.get(CaptureResult.STATISTICS_SCENE_FLICKER)
                 val motionExposure = SweepExposurePolicy.select(
                     exposure,
                     sensitivity,
                     exposureRange.lower..exposureRange.upper,
                     sensitivityRange.lower..sensitivityRange.upper,
+                    sceneFlicker,
                 )
                 exposure = motionExposure.timeNs
                 sensitivity = motionExposure.sensitivityIso
-                if (exposure > SweepExposurePolicy.TARGET_EXPOSURE_NS) {
+                if (exposure > SweepExposurePolicy.motionExposureBudgetNs(sceneFlicker)) {
                     activeWriter?.addWarning("Light is too low for a short sweep exposure; add light and move slowly")
                 }
             }
