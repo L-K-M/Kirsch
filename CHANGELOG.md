@@ -2,5 +2,19 @@
 
 ## Unreleased
 
-- No changes recorded yet. Earlier history lives in the commit log and any
-  GitHub releases; future changes will be noted here.
+- Improve sweep focus, shutter choice, blur rejection, and viewpoint selection.
+- Select a 10 ms sweep shutter target for detected 50 Hz lighting; retain 8.333 ms otherwise.
+- Preserve rendered color and detail with safer registration and fusion.
+- Correct calibrated print shape at single-axis tilt and preserve full-frame pixels.
+- Normalize crop and calibration origins, select the basis from actual distortion mode, and decline ambiguous camera geometry.
+- Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
+- Keep captured scans upright through rectification, review, editing, and export.
+- Keep live edits and saves consistent across review recreation and resumption.
+- Keep older scan completion from interrupting a newer capture.
+- Report incomplete camera calibration as validation errors instead of crashing.
+- Offer failed-scan retry and guard editing and photo-library publication.
+- Keep accepted orientation and physical scale consistent with the saved version.
+- Run native OpenCV and review-flow regressions on an Android emulator in CI.
+
+Physical glossy-print comparisons against the stock camera and PhotoScan remain
+unverified; synthetic tests and successful builds do not establish that result.

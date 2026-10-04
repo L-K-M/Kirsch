@@ -1,7 +1,7 @@
 # Kirsch — Analysis and Open Work
 
 **Origin:** full desk review of commit `f7529e8`, 2026-07-25.
-**Status:** ten findings addressed in PRs #22–#27; the rest is open work.
+**Status:** PRs #22–#27 addressed the initial findings. The 2026-10-03 review and implementation below supersede the older backlog where stated.
 
 This is the living backlog. Items that shipped are recorded in
 [§1](#1-landed) with what changed and where, so nothing is lost; everything
@@ -20,6 +20,114 @@ crash), **[S2]** significant (quality, performance or UX cost a user notices),
 **[S3]** minor (polish, hygiene, latent risk), **[IDEA]** speculative.
 
 ---
+
+## 2026-10-03 quality review
+
+The current review covered acquisition, sweep selection, registration, fusion,
+perspective correction, native memory ownership, review, editing, export, and
+recovery. It found concrete ways the processing could make a photograph worse:
+
+| Problem | Correction and verification |
+|---|---|
+| A long preview shutter is reused while the phone moves | Manual-sensor sweeps normally target 8.333 ms (1/120 s); explicit 50 Hz detection selects 10 ms (1/100 s), as merged in [#46](https://github.com/L-K-M/Kirsch/pull/46). Preserve shorter exposures, compensate with ISO, and report fallback above the selected budget. Pure exposure-policy regressions cover detection, brightness, and ISO limits. |
+| Failed AF is counted as a lock; missing lens distance resets focus | Require successful AF and retain triggered focus when distance is unavailable. AF policy regressions observed failing before correction. |
+| Decimated sharpness misses native detail; sustained blur resets the gate | Measure native-resolution patches and preserve the best sweep score. Fine-detail and sustained-blur regressions observed failing before correction. |
+| Five clock-spaced views discard directional diversity | Capture measured positions; retain the origin and directional extrema with displacement-based fill. Directional-selection regressions observed failing before correction. |
+| Middle-frame reference can be blurred | Use measured sharpness for reference and fallback, reject substantially blurred views. Native OpenCV regression observed failing before correction. |
+| Sensor exposure multiplication clips already rendered YUV | Estimate bounded brightness adjustment from corresponding rendered samples. Native exposure regression observed failing before correction. |
+| Equal-luma colors blend into ghosts | Require color agreement and report actual contributors in confidence. Native pixel regression observed failing before correction. |
+| Localized matches or border interpolation contaminate fusion | Reject unsafe homography support/geometry and exclude partially interpolated borders. Native registration tests cover localized matches and known shifts. |
+| Single-axis tilt stretches a print | Record sensor geometry and normalize crop and calibration coordinates to the selected array origin. Actual distortion mode chooses the pre-correction array for OFF and the active array for FAST/HIGH_QUALITY; unknown mode with differing arrays declines intrinsics. Calibrate at the full stream size recorded in characteristics, then subtract the packed image crop origin without rescaling. Malformed or out-of-bounds sensor and packed crops decline intrinsics. Preserve calibrated shape in automatic and manual rectification. Native metadata and synthetic 35° pitch/yaw regressions observed failing before correction. |
+| Review never shows the deliverable | Show the actual active or exported version with zoom and dimensions, explain fallback, and retain crop drafts. Native UI tests check actual rendered pixels and screen recreation. |
+| Portrait capture is upright in preview but sideways in review | Record rear-camera sensor and display orientation at capture, request unrotated sensor pixels, and rotate finished images and maps after rectification. Keep working pixels and calibration in sensor coordinates. A real emulator capture reproduced the mismatch; native pixel, edit, and metadata regressions observed failing before correction. |
+| Sideways photos cannot be corrected | Add reversible rotation with lossless companions; preserve orientation through crop and physical-scale metadata. Native processing/UI tests cover dimensions and visible results. |
+| Saving an older version keeps the current version's orientation and scale | Accept the selected image as the active output and derive its sampling frequency from its dimensions. Native regression observed the rotated physical width before correction. |
+| Recreating review during an edit enables controls over a stale preview | Retain live operations independently of the Activity, keep controls busy, and reload the committed image before enabling them. Native rotation/recreation regression observed failing before correction. |
+| Returning to an older review screen shows a version changed by another screen | Rebind and refresh on resume, preserving only unfinished corner changes. Native two-screen rotation/save regression observed failing before correction. |
+| An older completed scan opens review and cancels a newer capture | Reserve the latest capture identity at the shutter tap, retain it across delayed completion callbacks, and open automatic review only while idle. Three native callback regressions observed failing before correction cover queued requests, older completions, and active captures; an idle control preserves normal navigation. |
+| Incomplete calibration metadata crashes package validation | Return validation issues for missing calibration fields. Four missing-field subtests observed `KeyError` before correction. |
+| Failed processing has no recovery action | Expose retained failed scans for retry and rebind listeners after screen recreation. Original capture files stay intact. |
+
+The native moving-glare comparator uses known shifts on a synthetic textured
+color image. Its gates require mean RGB error below two code values and more
+than 70% reduction of the reference frame's glare error. These are regression
+gates, not measured performance on real prints. The local native test measured
+mean RGB error of 3.440 for the reference and 0.164 for fusion, a 95.24%
+reduction on that synthetic fixture. No physical phone is connected in this
+review environment.
+
+A separate full-resolution probe of snapshot `d9e376e` processed five
+4032 × 3024 I420 views through the complete pipeline. All five registered,
+fusion ran, a print was detected and rectified to 3844 × 2837 pixels, and
+the four image exports passed hash verification, including a decoded 16-bit
+TIFF container. Processing took 6.552 seconds on an API 36 arm64 emulator.
+PSS rose from 37.86 MiB to a sampled peak of 419.84 MiB; native allocations
+rose from 5.53 MiB to 358.43 MiB. This was one synthetic run with 500 ms
+sampling, which can miss shorter peaks. Camera capture and review UI were
+outside the measured interval; physical device performance remains unverified.
+
+The final candidate's local checks cover 102 JVM tests, 55 native tests on an
+API 35 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
+and lint pass; lint retains 11 warnings and reports no errors. Native review
+tests include a real photo-library export, unchanged source bytes, EXIF,
+selected-version acceptance, failed-edit draft preservation, and screen
+recreation or resumption while work completes. Four native capture-callback
+tests also check immediate request reservation, delayed completion, active
+capture navigation, and normal idle review. CI separately exercises native
+tests on an API 35 x86_64 emulator. The same application source also passed
+the full native suite and actual Camera2 captures on API 36 arm64 before
+the final test-diagnostic update.
+
+One API 35 x86_64 CI run failed the save-version chooser's five-second
+accessibility-title lookup. The original oracle passed three API 35 arm64
+controls: chooser alone, after capture callbacks, and in the full native
+suite. The CI failure remains unreproduced and its cause unconfirmed. The
+test now asserts Save is ready before clicking and records control, window,
+and query-timing evidence; CI retains raw native results and logs. No
+production change or timeout increase is claimed as a fix for that failure.
+
+Actual Camera2 quick and fixed nine-frame captures of the emulator's virtual
+room verified that upright preview and finished review agree at 960 × 1280
+pixels. Working images remain 1280 × 960 in sensor coordinates, with sensor
+orientation 90°, display rotation 0°, and one clockwise output turn. Every
+frame reported `ROTATE_AND_CROP_NONE`; TIFF pixels exactly match the working
+image after that rotation, and recorded sizes and hashes agree. The burst
+accepted all nine views, registered five, and fused them. This verifies the
+stable rear-camera path on the emulator, with no injected capture fixture;
+the default displacement-driven sweep, dynamic fold, and physical-camera
+orientation switches remain unverified by this smoke test.
+
+Automated review suggested accepting failed-focus captures as a fallback.
+That suggestion was rejected because it conflicts with the quality goal.
+The suggested omission of per-stream aspect cropping was also rejected after
+checking the Camera2 coordinate contract. Minor test-framework modernization,
+extra diagnostics, and repeated sharpness scoring remain deferred.
+
+The shutter adjustment targets detected 50 Hz mains lighting. General PWM
+lighting and anti-flicker period quantization of longer ISO-limited exposures
+remain outside that adjustment.
+
+The following remain necessary before calling Kirsch a proven camera-quality
+replacement:
+
+- Capture the same glossy and matte prints with Kirsch, the stock camera, and
+  PhotoScan on supported device classes. Compare glare, detail, color, shape,
+  latency, memory, thermal behavior, and failed sweeps against flatbed references.
+- Profile full-resolution sweeps on phones with and without manual sensor
+  support. Emulator tests cannot verify vendor AF, shutter response, optical
+  calibration, or motion blur.
+- Curled prints still use one global homography; local registration refinement
+  and tiled processing for more views need separate quality and memory evidence.
+- Automatic boundary detection can mistake picture content or table edges for
+  the print. Review now makes the result inspectable, but detector confidence
+  and difficult backgrounds need a physical dataset.
+- Large archives still need storage management, scan naming, a visual library,
+  continuous capture, and full-resolution tiled inspection. RAW development,
+  learned restoration, and other capability gates remain unchanged.
+
+Older entries below are retained as review history. In particular, §§2.1, 2.2,
+2.4, 2.5, 6.4, and 6.8 are now fully or partly addressed as described above;
+they should not be read as descriptions of the new implementation.
 
 ## Table of contents
 

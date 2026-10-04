@@ -89,4 +89,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: imaging-test-reports
-          path: app/build/reports/androidTests
+          path: |
+            app/build/reports/androidTests
+            app/build/outputs/androidTest-results

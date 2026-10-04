@@ -13,6 +13,7 @@ import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 import org.opencv.core.CvType
+import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.core.MatOfInt
 import org.opencv.imgcodecs.Imgcodecs
@@ -28,7 +29,6 @@ class ScanProcessor(private val context: Context) {
         require(captureRecord.getString("status") == "accepted") { "Only accepted captures can enter processing" }
         val captureId = captureRecord.getString("capture_id")
         val root = File(scanRoot(), captureId)
-        check(root.mkdirs() || root.isDirectory) { "Unable to create scan directory: $root" }
         val manifestFile = File(root, "scan.json")
         val processingAttempt = if (manifestFile.isFile) {
             runCatching { JSONObject(manifestFile.readText()).optInt("processing_attempt", 0) }.getOrDefault(0) + 1
@@ -41,6 +41,15 @@ class ScanProcessor(private val context: Context) {
                 return Result(manifestFile, File(root, existing.getString("preview_path")), existing.optBoolean("used_fusion"))
             }
         }
+        val cameraRecord = captureRecord.optJSONObject("camera")
+        val outputQuarterTurns = if (cameraRecord?.has("capture_output_rotation_quarter_turns") == true) {
+            val value = cameraRecord.opt("capture_output_rotation_quarter_turns")
+            require(value is Number && value.toDouble() in 0.0..3.0 && value.toDouble() == value.toInt().toDouble()) {
+                "Capture orientation must be an integer from 0 to 3 clockwise quarter turns"
+            }
+            value.toInt()
+        } else 0
+        check(root.mkdirs() || root.isDirectory) { "Unable to create scan directory: $root" }
         val started = SystemClock.elapsedRealtime()
         val thermalStart = context.getSystemService(PowerManager::class.java)?.currentThermalStatus
         val stateMachine = ScanStateMachine(ScanState.QUEUED)
@@ -100,6 +109,17 @@ class ScanProcessor(private val context: Context) {
             val rectified = own(PrintGeometry.rectify(fused.image, selectedQuad, intrinsics = intrinsics))
             val confidence = own(PrintGeometry.rectify(fused.confidence, selectedQuad, Imgproc.INTER_NEAREST, intrinsics))
             val failure = own(PrintGeometry.rectify(fused.failure, selectedQuad, Imgproc.INTER_NEAREST, intrinsics))
+            val outputRotation = when (outputQuarterTurns) {
+                1 -> Core.ROTATE_90_CLOCKWISE
+                2 -> Core.ROTATE_180
+                3 -> Core.ROTATE_90_COUNTERCLOCKWISE
+                else -> null
+            }
+            // Working pixels, calibration, and saved corners stay sensor-native.
+            // Only the delivered image and its maps follow the capture preview.
+            if (outputRotation != null) {
+                listOf(rectified, confidence, failure).forEach { Core.rotate(it, it, outputRotation) }
+            }
             val derivatives = File(root, "derivatives").apply { mkdirs() }
             val preview = File(derivatives, "acquisition-master.jpg")
             val tiff = File(derivatives, "acquisition-master.tif")
@@ -126,6 +146,9 @@ class ScanProcessor(private val context: Context) {
                 .put("detected_regions", quadsJson(detectedQuads, fused.image.cols(), fused.image.rows()))
                 .put("selected_quad", quadJson(selectedQuad, fused.image.cols(), fused.image.rows()))
                 .put("source_bit_depth", sourceBitDepth)
+                .put("output_rotation_quarter_turns", outputQuarterTurns)
+                .put("output_pixel_width", rectified.cols())
+                .put("output_pixel_height", rectified.rows())
                 .put("tiff_container_bit_depth", 16)
                 .put("elapsed_ms", SystemClock.elapsedRealtime() - started)
                 .put("java_heap_used_bytes", usedHeapBytes())
@@ -146,6 +169,7 @@ class ScanProcessor(private val context: Context) {
                 .put("fusion_failure", fusionFailure)
                 .put("auto_crop_detected", detectedQuads.isNotEmpty())
                 .put("working_intrinsics", intrinsics?.toJson())
+                .put("output_rotation_quarter_turns", outputQuarterTurns)
                 .put("preview_path", preview.relativeTo(root).invariantSeparatorsPath)
                 .put("working_image_path", fusedWorking.relativeTo(root).invariantSeparatorsPath)
                 .put("processing_report", reportFile.relativeTo(root).invariantSeparatorsPath)
@@ -154,10 +178,10 @@ class ScanProcessor(private val context: Context) {
                     "derivatives",
                     JSONArray(
                         listOf(
-                            derivativeRecord(root, preview, "acquisition-master", "image/jpeg", null),
-                            derivativeRecord(root, tiff, "acquisition-master", "image/tiff", null),
-                            derivativeRecord(root, confidenceFile, "confidence-map", "image/png", null),
-                            derivativeRecord(root, failureFile, "failure-map", "image/png", null),
+                            derivativeRecord(root, preview, "acquisition-master", "image/jpeg", outputQuarterTurns),
+                            derivativeRecord(root, tiff, "acquisition-master", "image/tiff", outputQuarterTurns),
+                            derivativeRecord(root, confidenceFile, "confidence-map", "image/png", outputQuarterTurns),
+                            derivativeRecord(root, failureFile, "failure-map", "image/png", outputQuarterTurns),
                         ),
                     ),
                 )
@@ -236,12 +260,12 @@ class ScanProcessor(private val context: Context) {
         file: File,
         kind: String,
         mediaType: String,
-        recipe: String?,
+        quarterTurns: Int,
     ): JSONObject = JSONObject()
         .put("path", file.relativeTo(root).invariantSeparatorsPath)
         .put("kind", kind)
         .put("media_type", mediaType)
-        .put("recipe", recipe)
+        .put("output_rotation_quarter_turns", quarterTurns)
         .put("bytes", file.length())
         .put("sha256", sha256(file))
 
