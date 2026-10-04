@@ -2,7 +2,13 @@ package ch.lkmc.kirsch.imaging
 
 import android.test.InstrumentationTestCase
 import android.util.Log
+import android.hardware.camera2.CameraMetadata
+import java.io.File
+import java.security.MessageDigest
 import java.util.Random
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -147,6 +153,56 @@ class ImagingQualityTest : InstrumentationTestCase() {
             frames.forEach { it.bgr.release() }
         }
     }
+
+    fun testPackedImageCropKeepsFullStreamCalibrationThroughLoader() {
+        val directory = File(instrumentation.targetContext.cacheDir, "intrinsics-${UUID.randomUUID()}")
+        check(directory.mkdirs())
+        var frames = emptyList<CaptureFrameLoader.LoadedFrame>()
+        try {
+            val payload = File(directory, "frame.i420")
+            payload.writeBytes(ByteArray(80 * 70 * 3 / 2) { if (it < 80 * 70) 100 else 128.toByte() })
+            val characteristics = File(directory, "characteristics.json")
+            val active = JSONObject().put("left", 0).put("top", 0).put("right", 4000).put("bottom", 3000)
+            characteristics.writeText(JSONObject()
+                .put("camera_id", "camera")
+                .put("sensor_active_array", active)
+                .put("sensor_pre_correction_active_array", active)
+                .put("sensor_pixel_array", JSONObject().put("width", 4000).put("height", 3000))
+                .put("sensor_physical_size_mm", JSONObject().put("width", 6.0).put("height", 4.5))
+                .put("capture_size", JSONObject().put("width", 120).put("height", 90))
+                .toString())
+            val metadata = File(directory, "metadata.json")
+            metadata.writeText(JSONObject()
+                .put("lens_focal_length_mm", 4.0)
+                .put("distortion_correction_mode", CameraMetadata.DISTORTION_CORRECTION_MODE_FAST)
+                .put("image_crop_region", JSONObject().put("left", 20).put("top", 10).put("right", 100).put("bottom", 80))
+                .toString())
+            File(directory, "capture.json").writeText(JSONObject()
+                .put("status", "accepted").put("mode", "yuv-420-888")
+                .put("camera", JSONObject().put("characteristics_file", assetRecord(characteristics, "camera-characteristics")))
+                .put("frames", JSONArray().put(JSONObject()
+                    .put("frame_index", 0).put("width", 80).put("height", 70)
+                    .put("files", JSONArray().put(assetRecord(payload, "i420")).put(assetRecord(metadata, "capture-metadata")))))
+                .toString())
+
+            frames = CaptureFrameLoader.load(directory).second
+            assertEquals(1, frames.size)
+            assertEquals(80, frames.single().bgr.cols())
+            assertEquals(70, frames.single().bgr.rows())
+            val intrinsics = requireNotNull(frames.single().intrinsics)
+            assertEquals(80.0, intrinsics.focalX, 1e-9)
+            assertEquals(80.0, intrinsics.focalY, 1e-9)
+            assertEquals(40.0, intrinsics.centerX, 1e-9)
+            assertEquals(35.0, intrinsics.centerY, 1e-9)
+        } finally {
+            frames.forEach { it.bgr.release() }
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun assetRecord(file: File, role: String): JSONObject = JSONObject()
+        .put("path", file.name).put("role", role).put("bytes", file.length())
+        .put("sha256", MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) })
 
     private fun interiorError(image: Mat, truth: Mat): Double {
         val difference = Mat()

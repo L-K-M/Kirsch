@@ -61,6 +61,7 @@ object CaptureMetadata {
         }))
         .put("color_correction_transform", result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)?.toString())
         .put("neutral_color_point", rationalArray(result.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)))
+        .put("distortion_correction_mode", result.get(CaptureResult.DISTORTION_CORRECTION_MODE))
         .put("scaler_crop_region", rectJson(result.get(CaptureResult.SCALER_CROP_REGION)))
         .put("image_crop_region", rectJson(crop))
         .put(
