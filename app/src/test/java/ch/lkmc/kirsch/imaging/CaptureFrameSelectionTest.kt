@@ -5,7 +5,21 @@ import org.junit.Test
 
 class CaptureFrameSelectionTest {
     @Test
-    fun selectsTheOriginAndAllFourDirectionalExtremes() {
+    fun retainsSharpestViewWithinDirectionalCoverageBudget() {
+        val observations = listOf(
+            CaptureFrameSelection.Observation(0.0, 0.0, 25.0),
+            CaptureFrameSelection.Observation(-3.0, 5.0, 36.0),
+            CaptureFrameSelection.Observation(100.0, 0.0, 20.0),
+            CaptureFrameSelection.Observation(-100.0, 0.0, 20.0),
+            CaptureFrameSelection.Observation(0.0, 100.0, 20.0),
+            CaptureFrameSelection.Observation(0.0, -100.0, 20.0),
+        )
+
+        assertEquals(listOf(1, 2, 3, 4, 5), CaptureFrameSelection.positions(6, 5, observations))
+    }
+
+    @Test
+    fun equallySharpViewsKeepTheOriginAndAllFourDirectionalExtremes() {
         val positions = listOf(
             0.0 to 0.0, 100.0 to 0.0, 80.0 to 0.0,
             0.0 to 100.0, 0.0 to 80.0, -100.0 to 0.0,

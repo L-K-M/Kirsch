@@ -78,8 +78,9 @@
     <string name="revert_to_unrestored">USE ORIGINAL SCAN</string>
     <string name="reverting_to_unrestored">Going back to the original scan…</string>
     <string name="active_output_master">Saving: the original scan</string>
+    <string name="active_output_corrected">Saving: the corner-corrected scan</string>
     <string name="active_output_restored">Saving: the %1$s copy</string>
-    <string name="review_finish_section">FINISH</string>
+    <string name="review_apply_before_save">Apply your corner changes before saving.</string>
     <string name="accept_scan">SAVE TO PHOTOS</string>
     <string name="review_save_caption">Adds the finished scan to your photo library (Pictures/Kirsch) and locks this version. Sources stay on the device for reprocessing.</string>
     <string name="saving_scan">Saving to your photo library…</string>
