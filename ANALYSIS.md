@@ -44,6 +44,7 @@ recovery. It found concrete ways the processing could make a photograph worse:
 | Saving an older version keeps the current version's orientation and scale | Accept the selected image as the active output and derive its sampling frequency from its dimensions. Native regression observed the rotated physical width before correction. |
 | Recreating review during an edit enables controls over a stale preview | Retain live operations independently of the Activity, keep controls busy, and reload the committed image before enabling them. Native rotation/recreation regression observed failing before correction. |
 | Returning to an older review screen shows a version changed by another screen | Rebind and refresh on resume, preserving only unfinished corner changes. Native two-screen rotation/save regression observed failing before correction. |
+| An older completed scan opens review and cancels a newer capture | Reserve the latest capture identity at the shutter tap, retain it across delayed completion callbacks, and open automatic review only while idle. Three native callback regressions observed failing before correction cover queued requests, older completions, and active captures; an idle control preserves normal navigation. |
 | Incomplete calibration metadata crashes package validation | Return validation issues for missing calibration fields. Four missing-field subtests observed `KeyError` before correction. |
 | Failed processing has no recovery action | Expose retained failed scans for retry and rebind listeners after screen recreation. Original capture files stay intact. |
 
@@ -65,12 +66,14 @@ rose from 5.53 MiB to 358.43 MiB. This was one synthetic run with 500 ms
 sampling, which can miss shorter peaks. Camera capture and review UI were
 outside the measured interval; physical device performance remains unverified.
 
-The final candidate's local checks cover 102 JVM tests, 51 native tests on an
+The final candidate's local checks cover 102 JVM tests, 55 native tests on an
 API 36 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
 and lint pass; lint retains 11 warnings and reports no errors. Native review
 tests include a real photo-library export, unchanged source bytes, EXIF,
 selected-version acceptance, failed-edit draft preservation, and screen
-recreation or resumption while work completes. CI separately exercises native
+recreation or resumption while work completes. Four native capture-callback
+tests also check immediate request reservation, delayed completion, active
+capture navigation, and normal idle review. CI separately exercises native
 tests on an API 35 x86_64 emulator.
 
 Actual Camera2 quick and fixed nine-frame captures of the emulator's virtual

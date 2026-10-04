@@ -21,6 +21,8 @@ This shutter adjustment targets detected 50 Hz mains lighting. General PWM light
 
 Capture records the rear-camera sensor orientation and display rotation at shutter time. When supported, preview and capture requests disable automatic rotate-and-crop so working pixels and calibration share the sensor coordinate system. Finished images and confidence/failure maps are rotated after rectification, and later edits and exports retain that orientation. The stable rear-camera path is verified on an emulator; dynamic fold and physical-camera orientation switches still need device verification. Older packages without capture orientation retain their original behavior.
 
+The shutter reserves the latest capture identity before camera work is queued. Older scans still finish and remain in the library, but their delayed completion cannot replace that identity or open review during a newer capture. Automatic review opens only for the latest requested scan while capture is idle.
+
 If a kept view is evicted before its `CaptureResult` arrives — the reader holds only six full-resolution buffers, so a slow write path can exhaust them — the loss is recorded as a warning and the deliverable count follows it down. A sweep degrades to a shorter stack rather than failing the whole capture, and the shortfall is visible in the manifest as the gap between `extensions.warnings` and the kept count.
 
 ## Processing

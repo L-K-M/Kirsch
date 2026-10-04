@@ -145,9 +145,8 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         val printId = preferences(this).getString(PREF_PRINT_ID, null)
             ?.takeIf(String::isNotBlank)
             ?: getString(R.string.unassigned_print_id)
-        pendingReviewScanId = null
         statusChip.visibility = View.GONE
-        controller.capture(printId, textureView.display?.rotation ?: Surface.ROTATION_0)
+        pendingReviewScanId = controller.capture(printId, textureView.display?.rotation ?: Surface.ROTATION_0)
     }
 
     // Camera2BurstController.Listener
@@ -193,7 +192,6 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         if (status == "accepted" && mode == "yuv-420-888") {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                pendingReviewScanId = manifest.parentFile?.name
                 ScanQueue.enqueue(this, manifest, this)
             }
         } else if (status == "accepted") {
@@ -216,7 +214,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             statusChip.text = getString(R.string.scan_ready)
             statusChip.visibility = View.VISIBLE
             statusChip.announceForAccessibility(statusChip.text)
-            if (resumed && scanId != null && scanId == pendingReviewScanId) {
+            if (resumed && !capturing && scanId != null && scanId == pendingReviewScanId) {
                 pendingReviewScanId = null
                 startActivity(ReviewActivity.intent(this, result.manifest))
             }

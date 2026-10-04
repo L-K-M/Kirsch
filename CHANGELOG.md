@@ -10,6 +10,7 @@
 - Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
 - Keep captured scans upright through rectification, review, editing, and export.
 - Keep live edits and saves consistent across review recreation and resumption.
+- Keep older scan completion from interrupting a newer capture.
 - Report incomplete camera calibration as validation errors instead of crashing.
 - Offer failed-scan retry and guard editing and photo-library publication.
 - Keep accepted orientation and physical scale consistent with the saved version.

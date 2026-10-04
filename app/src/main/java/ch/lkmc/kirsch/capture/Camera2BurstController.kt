@@ -180,7 +180,12 @@ class Camera2BurstController(
         }
     }
 
-    fun capture(printId: String, displayRotation: Int) {
+    /** Reserves the request identity before queued camera work; failures still report through the listener. */
+    fun capture(printId: String, displayRotation: Int): String {
+        val captureId = CaptureIdentity.captureId(
+            Instant.now(),
+            UUID.randomUUID().toString().take(8),
+        )
         cameraHandler.post {
             if (activeWriter != null || lockPlan != null) {
                 status("A burst is already in progress")
@@ -194,10 +199,6 @@ class Camera2BurstController(
                 return@post
             }
             val normalizedPrintId = CaptureIdentity.normalizePrintId(printId)
-            val captureId = CaptureIdentity.captureId(
-                Instant.now(),
-                UUID.randomUUID().toString().take(8),
-            )
             val sensorOrientation = runCatching {
                 cameraManager.getCameraCharacteristics(currentConfig.cameraId).get(CameraCharacteristics.SENSOR_ORIENTATION)
             }.getOrNull() ?: currentConfig.characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
@@ -254,6 +255,7 @@ class Camera2BurstController(
                 }
             }, LOCK_TIMEOUT_MS)
         }
+        return captureId
     }
 
     fun stop() {
