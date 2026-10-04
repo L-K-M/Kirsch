@@ -29,7 +29,7 @@ recovery. It found concrete ways the processing could make a photograph worse:
 
 | Problem | Correction and verification |
 |---|---|
-| A long preview shutter is reused while the phone moves | Manual-sensor sweeps target 1/120 s with ISO compensation; preserve brightness at the ISO limit and report the longer-shutter fallback. Pure exposure-policy regressions cover the budget and limit. |
+| A long preview shutter is reused while the phone moves | Manual-sensor sweeps normally target 8.333 ms (1/120 s); explicit 50 Hz detection selects 10 ms (1/100 s), as merged in [#46](https://github.com/L-K-M/Kirsch/pull/46). Preserve shorter exposures, compensate with ISO, and report fallback above the selected budget. Pure exposure-policy regressions cover detection, brightness, and ISO limits. |
 | Failed AF is counted as a lock; missing lens distance resets focus | Require successful AF and retain triggered focus when distance is unavailable. AF policy regressions observed failing before correction. |
 | Decimated sharpness misses native detail; sustained blur resets the gate | Measure native-resolution patches and preserve the best sweep score. Fine-detail and sustained-blur regressions observed failing before correction. |
 | Five clock-spaced views discard directional diversity | Capture measured positions; retain the origin and directional extrema with displacement-based fill. Directional-selection regressions observed failing before correction. |
@@ -37,7 +37,7 @@ recovery. It found concrete ways the processing could make a photograph worse:
 | Sensor exposure multiplication clips already rendered YUV | Estimate bounded brightness adjustment from corresponding rendered samples. Native exposure regression observed failing before correction. |
 | Equal-luma colors blend into ghosts | Require color agreement and report actual contributors in confidence. Native pixel regression observed failing before correction. |
 | Localized matches or border interpolation contaminate fusion | Reject unsafe homography support/geometry and exclude partially interpolated borders. Native registration tests cover localized matches and known shifts. |
-| Single-axis tilt stretches a print | Record sensor geometry, account for capture crop, and preserve calibrated shape in automatic and manual rectification. Synthetic 35° pitch/yaw geometry regression observed failing before correction. |
+| Single-axis tilt stretches a print | Record sensor geometry and normalize crop and calibration coordinates to the selected array origin. Actual distortion mode chooses the pre-correction array for OFF and the active array for FAST/HIGH_QUALITY; unknown mode with differing arrays declines intrinsics. Calibrate at the full stream size recorded in characteristics, then subtract the packed image crop origin without rescaling. Malformed or out-of-bounds sensor and packed crops decline intrinsics. Preserve calibrated shape in automatic and manual rectification. Native metadata and synthetic 35° pitch/yaw regressions observed failing before correction. |
 | Review never shows the deliverable | Show the actual active or exported version with zoom and dimensions, explain fallback, and retain crop drafts. Native UI tests check actual rendered pixels and screen recreation. |
 | Sideways photos cannot be corrected | Add reversible rotation with lossless companions; preserve orientation through crop and physical-scale metadata. Native processing/UI tests cover dimensions and visible results. |
 | Saving an older version keeps the current version's orientation and scale | Accept the selected image as the active output and derive its sampling frequency from its dimensions. Native regression observed the rotated physical width before correction. |
@@ -64,13 +64,23 @@ rose from 5.53 MiB to 358.43 MiB. This was one synthetic run with 500 ms
 sampling, which can miss shorter peaks. Camera capture and review UI were
 outside the measured interval; physical device performance remains unverified.
 
-The final candidate's local checks cover 95 JVM tests, 23 native tests on an
+The final candidate's local checks cover 100 JVM tests, 49 native tests on an
 API 36 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
 and lint pass; lint retains 11 warnings and reports no errors. Native review
 tests include a real photo-library export, unchanged source bytes, EXIF,
 selected-version acceptance, failed-edit draft preservation, and screen
 recreation or resumption while work completes. CI separately exercises native
 tests on an API 35 x86_64 emulator.
+
+Automated review suggested accepting failed-focus captures as a fallback.
+That suggestion was rejected because it conflicts with the quality goal.
+The suggested omission of per-stream aspect cropping was also rejected after
+checking the Camera2 coordinate contract. Minor test-framework modernization,
+extra diagnostics, and repeated sharpness scoring remain deferred.
+
+The shutter adjustment targets detected 50 Hz mains lighting. General PWM
+lighting and anti-flicker period quantization of longer ISO-limited exposures
+remain outside that adjustment.
 
 The following remain necessary before calling Kirsch a proven camera-quality
 replacement:

@@ -3,8 +3,10 @@
 ## Unreleased
 
 - Improve sweep focus, shutter choice, blur rejection, and viewpoint selection.
+- Select a 10 ms sweep shutter target for detected 50 Hz lighting; retain 8.333 ms otherwise.
 - Preserve rendered color and detail with safer registration and fusion.
 - Correct calibrated print shape at single-axis tilt and preserve full-frame pixels.
+- Normalize crop and calibration origins, select the basis from actual distortion mode, and decline ambiguous camera geometry.
 - Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
 - Keep live edits and saves consistent across review recreation and resumption.
 - Report incomplete camera calibration as validation errors instead of crashing.
