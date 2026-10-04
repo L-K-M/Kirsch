@@ -7,6 +7,8 @@ import kotlin.math.abs
 import kotlin.math.min
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
 
 object ConservativeFusion {
     data class Result(val image: Mat, val confidence: Mat, val failure: Mat)
@@ -49,6 +51,8 @@ object ConservativeFusion {
     const val AGREEMENT_TOLERANCE = 10
 
     private const val COLOR_AGREEMENT_TOLERANCE = 16
+    private const val MINIMUM_CLEAN_VIEWS = 2
+    private const val HIGHLIGHT_SUPPORT_DIAMETER = 7
 
     /**
      * Anchors on a sample and returns the run of samples that agree with it.
@@ -77,6 +81,10 @@ object ConservativeFusion {
                 sortedLumas[median] - sortedLumas[low] >= OUTLIER_MEDIAN_LIFT
             if (movingHighlight) low else median
         }
+        return agreeingRun(sortedLumas, validCount, anchor, tolerance)
+    }
+
+    private fun agreeingRun(sortedLumas: IntArray, validCount: Int, anchor: Int, tolerance: Int): Selection {
         val anchorLuma = sortedLumas[anchor]
         var first = anchor
         while (first > 0 && anchorLuma - sortedLumas[first - 1] <= tolerance) first -= 1
@@ -108,18 +116,24 @@ object ConservativeFusion {
         require(height > 0 && width > 0)
         require(masks.all { it.rows() == height && it.cols() == width && it.type() == CvType.CV_8UC1 })
         val confidenceDivisor = contributingFrameCount.coerceIn(1, images.size)
-        val output = Mat(height, width, CvType.CV_8UC3)
-        val confidence = Mat(height, width, CvType.CV_8UC1)
-        val failure = Mat(height, width, CvType.CV_8UC1)
-        // Every row is computed independently from that row's inputs alone, so
+        val output = Mat()
+        val confidence = Mat()
+        val failure = Mat()
+        val supportedHighlights = Mat()
+        // After the highlight mask is complete, rows are independent, so
         // splitting the row range across workers is a pure speedup: the output
         // is byte-identical to the sequential order. Mat.get/put on disjoint
         // rows are plain native copies with no shared state, and Future.get
         // provides the happens-before edge for the workers' writes.
         val workers = min(height, maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
         try {
+            output.create(height, width, CvType.CV_8UC3)
+            confidence.create(height, width, CvType.CV_8UC1)
+            failure.create(height, width, CvType.CV_8UC1)
+            supportedHighlights.create(height, width, CvType.CV_8UC1)
+            findSupportedHighlights(images, masks, referenceIndex, supportedHighlights)
             if (workers <= 1) {
-                fuseRows(images, masks, referenceIndex, 0, height, width, confidenceDivisor, output, confidence, failure)
+                fuseRows(images, masks, supportedHighlights, referenceIndex, 0, height, width, confidenceDivisor, output, confidence, failure)
             } else {
                 val executor = Executors.newFixedThreadPool(workers)
                 try {
@@ -131,7 +145,7 @@ object ConservativeFusion {
                             null
                         } else {
                             executor.submit {
-                                fuseRows(images, masks, referenceIndex, rowStart, rowEnd, width, confidenceDivisor, output, confidence, failure)
+                                fuseRows(images, masks, supportedHighlights, referenceIndex, rowStart, rowEnd, width, confidenceDivisor, output, confidence, failure)
                             }
                         }
                     }
@@ -172,12 +186,98 @@ object ConservativeFusion {
             confidence.release()
             failure.release()
             throw error
+        } finally {
+            supportedHighlights.release()
         }
     }
+
+    private fun findSupportedHighlights(images: List<Mat>, masks: List<Mat>, referenceIndex: Int, highlights: Mat) {
+        val width = highlights.cols()
+        val imageRows = images.map { ByteArray(width * 3) }
+        val maskRows = masks.map { ByteArray(width) }
+        val highlightRow = ByteArray(width)
+        val sampleIndices = IntArray(images.size)
+        val sampleLumas = IntArray(images.size)
+        for (row in 0 until highlights.rows()) {
+            images.forEachIndexed { index, image ->
+                image.get(row, 0, imageRows[index])
+                masks[index].get(row, 0, maskRows[index])
+            }
+            for (column in 0 until width) {
+                highlightRow[column] = 0
+                if (maskRows[referenceIndex][column].toInt() and 0xff == 0) continue
+                val offset = column * 3
+                val count = collectSamples(imageRows, maskRows, column, sampleIndices, sampleLumas)
+                val selection = select(sampleLumas, count)
+                val anchor = imageRows[sampleIndices[selection.anchor]]
+                val reference = imageRows[referenceIndex]
+                val referenceLuma = sampleLumas[(0 until count).first { sampleIndices[it] == referenceIndex }]
+                if (referenceLuma - sampleLumas[selection.anchor] < OUTLIER_SPREAD) continue
+                var liftedChannels = 0
+                var darkerChannel = false
+                for (channel in 0..2) {
+                    val lift = (reference[offset + channel].toInt() and 0xff) - (anchor[offset + channel].toInt() and 0xff)
+                    if (lift >= AGREEMENT_TOLERANCE) liftedChannels++
+                    if (lift < -COLOR_AGREEMENT_TOLERANCE) darkerChannel = true
+                }
+                if (darkerChannel || liftedChannels < 2) continue
+                val cleanViews = (selection.first until selection.lastExclusive).count {
+                    sampleIndices[it] != referenceIndex && colorsAgree(imageRows[sampleIndices[it]], anchor, offset)
+                }
+                if (cleanViews >= MINIMUM_CLEAN_VIEWS) highlightRow[column] = 0xff.toByte()
+            }
+            highlights.put(row, 0, highlightRow)
+        }
+        // Small residual warps move letters and halftone dots too. Require a
+        // coherent highlight region before replacing the unwarped reference;
+        // opening removes thin edge/dot candidates while restoring supported
+        // highlight boundaries. A lone darker observation is insufficient.
+        val kernel = Imgproc.getStructuringElement(
+            Imgproc.MORPH_RECT, Size(HIGHLIGHT_SUPPORT_DIAMETER.toDouble(), HIGHLIGHT_SUPPORT_DIAMETER.toDouble()),
+        )
+        try {
+            Imgproc.morphologyEx(highlights, highlights, Imgproc.MORPH_OPEN, kernel)
+        } finally {
+            kernel.release()
+        }
+    }
+
+    private fun collectSamples(
+        imageRows: List<ByteArray>, maskRows: List<ByteArray>, column: Int,
+        sampleIndices: IntArray, sampleLumas: IntArray,
+    ): Int {
+        val offset = column * 3
+        var count = 0
+        imageRows.indices.forEach { index ->
+            if (maskRows[index][column].toInt() and 0xff != 0) {
+                val source = imageRows[index]
+                val b = source[offset].toInt() and 0xff
+                val g = source[offset + 1].toInt() and 0xff
+                val r = source[offset + 2].toInt() and 0xff
+                val luma = (29 * b + 150 * g + 77 * r) shr 8
+                var insertion = count
+                while (insertion > 0 && sampleLumas[insertion - 1] > luma) {
+                    sampleLumas[insertion] = sampleLumas[insertion - 1]
+                    sampleIndices[insertion] = sampleIndices[insertion - 1]
+                    insertion--
+                }
+                sampleLumas[insertion] = luma
+                sampleIndices[insertion] = index
+                count++
+            }
+        }
+        return count
+    }
+
+    private fun colorsAgree(source: ByteArray, anchor: ByteArray, offset: Int): Boolean =
+        (0..2).all { channel ->
+            abs((source[offset + channel].toInt() and 0xff) - (anchor[offset + channel].toInt() and 0xff)) <= COLOR_AGREEMENT_TOLERANCE
+        }
 
     private fun fuseRows(
         images: List<Mat>,
         masks: List<Mat>,
+        supportedHighlights: Mat,
         referenceIndex: Int,
         rowStart: Int,
         rowEnd: Int,
@@ -192,6 +292,7 @@ object ConservativeFusion {
         val outputRow = ByteArray(width * 3)
         val confidenceRow = ByteArray(width)
         val failureRow = ByteArray(width)
+        val highlightRow = ByteArray(width)
         val sampleIndices = IntArray(images.size)
         val sampleLumas = IntArray(images.size)
         for (row in rowStart until rowEnd) {
@@ -199,34 +300,18 @@ object ConservativeFusion {
                 image.get(row, 0, imageRows[index])
                 masks[index].get(row, 0, maskRows[index])
             }
+            supportedHighlights.get(row, 0, highlightRow)
             for (column in 0 until width) {
                 val sourceOffset = column * 3
-                var validCount = 0
-                images.indices.forEach { index ->
-                    if (maskRows[index][column].toInt() and 0xff != 0) {
-                        val b = imageRows[index][sourceOffset].toInt() and 0xff
-                        val g = imageRows[index][sourceOffset + 1].toInt() and 0xff
-                        val r = imageRows[index][sourceOffset + 2].toInt() and 0xff
-                        sampleIndices[validCount] = index
-                        sampleLumas[validCount] = (29 * b + 150 * g + 77 * r) shr 8
-                        validCount++
-                    }
-                }
-                for (index in 1 until validCount) {
-                    val luma = sampleLumas[index]
-                    val frame = sampleIndices[index]
-                    var insertion = index
-                    while (insertion > 0 && sampleLumas[insertion - 1] > luma) {
-                        sampleLumas[insertion] = sampleLumas[insertion - 1]
-                        sampleIndices[insertion] = sampleIndices[insertion - 1]
-                        insertion--
-                    }
-                    sampleLumas[insertion] = luma
-                    sampleIndices[insertion] = frame
-                }
+                val validCount = collectSamples(imageRows, maskRows, column, sampleIndices, sampleLumas)
                 var allSaturated = validCount > 0
                 for (index in 0 until validCount) allSaturated = allSaturated && sampleLumas[index] >= 250
-                val selection = select(sampleLumas, validCount)
+                val referencePosition = (0 until validCount).firstOrNull { sampleIndices[it] == referenceIndex }
+                val selection = if (referencePosition != null && highlightRow[column].toInt() and 0xff == 0) {
+                    agreeingRun(sampleLumas, validCount, referencePosition, AGREEMENT_TOLERANCE)
+                } else {
+                    select(sampleLumas, validCount)
+                }
                 var contributors = 0
                 if (selection.size == 0) {
                     outputRow[sourceOffset] = imageRows[referenceIndex][sourceOffset]
@@ -247,10 +332,7 @@ object ConservativeFusion {
                     var sumR = 0
                     for (position in selection.first until selection.lastExclusive) {
                         val source = imageRows[sampleIndices[position]]
-                        if ((0..2).any { channel ->
-                                abs((source[sourceOffset + channel].toInt() and 0xff) -
-                                    (colorAnchor[sourceOffset + channel].toInt() and 0xff)) > COLOR_AGREEMENT_TOLERANCE
-                            }) continue
+                        if (!colorsAgree(source, colorAnchor, sourceOffset)) continue
                         contributors++
                         sumB += source[sourceOffset].toInt() and 0xff
                         sumG += source[sourceOffset + 1].toInt() and 0xff

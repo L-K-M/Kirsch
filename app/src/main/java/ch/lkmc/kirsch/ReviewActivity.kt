@@ -35,6 +35,7 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
     private lateinit var qualityAdvisory: TextView
     private lateinit var status: TextView
     private lateinit var activeOutput: TextView
+    private lateinit var saveGuidance: TextView
     private lateinit var revertButton: Button
     private lateinit var saveButton: Button
     private lateinit var rotateButton: Button
@@ -114,6 +115,7 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
         val statusText: String,
         val editable: Boolean,
         val restoredLabel: String?,
+        val outputLabel: String,
         val advisory: String,
     )
 
@@ -162,11 +164,7 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
                         // What "SAVE TO PHOTOS" will actually export.
                         // Enhancements replace the active output, so the user
                         // needs to see which one is live.
-                        activeOutput.text = if (scan.restoredLabel == null) {
-                            getString(R.string.active_output_master)
-                        } else {
-                            getString(R.string.active_output_restored, scan.restoredLabel)
-                        }
+                        activeOutput.text = scan.outputLabel
                     },
                     onFailure = {
                         operationInProgress = false
@@ -217,6 +215,7 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
                 "The saved print corners are invalid"
             }
             val exported = manifest.optJSONObject("extensions")?.has("gallery_uri") == true
+            val restoredLabel = activeRecipe(manifest, outputPath)
             val statusText = if (accepted && exported) {
                 getString(R.string.scan_accepted)
             } else if (accepted) {
@@ -241,7 +240,8 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
                 points,
                 statusText,
                 manifest.optString("state") == "review",
-                activeRecipe(manifest, outputPath),
+                restoredLabel,
+                activeOutputLabel(manifest, outputPath, restoredLabel),
                 buildList {
                     if (manifest.has("auto_crop_detected") && !manifest.optBoolean("auto_crop_detected") && !manifest.has("manual_quad")) {
                         add(getString(if (accepted) R.string.review_uncropped_saved_warning else R.string.review_uncropped_warning))
@@ -269,6 +269,22 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
             return restorationLabel(recipe)
         }
         return null
+    }
+
+    private fun activeOutputLabel(manifest: JSONObject, preview: String, restoredLabel: String?): String {
+        if (restoredLabel != null) return getString(R.string.active_output_restored, restoredLabel)
+        val derivatives = manifest.optJSONArray("derivatives")
+        if (derivatives != null) {
+            for (index in derivatives.length() - 1 downTo 0) {
+                val entry = derivatives.optJSONObject(index) ?: continue
+                if (entry.optString("path") != preview) continue
+                if (entry.optString("recipe") == "manual-rectification") {
+                    return getString(R.string.active_output_corrected)
+                }
+                break
+            }
+        }
+        return getString(R.string.active_output_master)
     }
 
     private fun buildUi() {
@@ -318,22 +334,6 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         content.addView(qualityAdvisory)
-
-        content.addView(sectionHeader(R.string.review_finish_section))
-        activeOutput = TextView(this).apply {
-            setTextColor(0xFFFFB84D.toInt())
-            textSize = 13f
-            setPadding(0, 0, 0, dp(6))
-            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        content.addView(activeOutput)
-        saveButton = Button(this).apply {
-            setText(R.string.accept_scan)
-            setOnClickListener { saveScan() }
-            editingControls += this
-        }
-        content.addView(saveButton)
-        content.addView(caption(R.string.review_save_caption))
 
         content.addView(sectionHeader(R.string.review_corners_section))
         content.addView(caption(R.string.corner_editor_help))
@@ -404,23 +404,51 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
             },
         )
         content.addView(caption(R.string.review_scale_caption))
+        content.addView(caption(R.string.review_save_caption))
 
-        setContentView(
-            ScrollView(this).apply {
-                setBackgroundColor(0xFF0E0D0B.toInt())
-                addView(
-                    content,
-                    ViewGroup.LayoutParams(
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        activeOutput = TextView(this).apply {
+            setTextColor(0xFFFFB84D.toInt())
+            textSize = 13f
+            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        footer.addView(activeOutput)
+        saveGuidance = TextView(this).apply {
+            setText(R.string.review_apply_before_save)
+            setTextColor(0xFFD7CFC3.toInt())
+            textSize = 12f
+            visibility = View.GONE
+            accessibilityLiveRegion = TextView.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        footer.addView(saveGuidance)
+        saveButton = Button(this).apply {
+            setText(R.string.accept_scan)
+            setOnClickListener { saveScan() }
+            editingControls += this
+        }
+        footer.addView(saveButton)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0E0D0B.toInt())
+            addView(
+                ScrollView(this@ReviewActivity).apply {
+                    addView(content, ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-            },
-        )
-        // The content scrolls, so the insets belong to it rather than to the
-        // ScrollView: the last control clears the gesture bar instead of
-        // sitting under it, and the title clears the status bar.
-        SystemBars.pad(content, left = true, top = true, right = true, bottom = true, includeIme = true)
+                    ))
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            )
+            addView(footer)
+        }
+        setContentView(root)
+        // Keep the single export action reachable while the image and corner
+        // controls scroll. Root insets also protect it from system bars and
+        // the keyboard after a crop changes the scrollable preview's height.
+        SystemBars.pad(root, left = true, top = true, right = true, bottom = true, includeIme = true)
     }
 
     private fun runTask(message: String, draftPolicy: DraftPolicy = DraftPolicy.PRESERVE, operation: () -> File) {
@@ -637,6 +665,7 @@ class ReviewActivity : Activity(), ReviewOperations.Listener {
         cornerEditor.isEnabled = !busy && editable
         revertButton.isEnabled = !busy && editable && restoredActive
         saveButton.isEnabled = !busy && editable && !hasUnappliedCorners()
+        saveGuidance.visibility = if (editable && hasUnappliedCorners()) View.VISIBLE else View.GONE
         rotateButton.isEnabled = !busy && editable && !hasUnappliedCorners()
     }
 

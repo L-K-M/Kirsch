@@ -14,8 +14,10 @@ internal object CaptureFrameSelection {
         val candidates = observations.indices.filter { observations[it].sharpness >= bestSharpness * 0.5 }
         val selected = linkedSetOf<Int>()
         val origin = observations[0]
-        selected += candidates.minWith(compareBy<Int> { distance(observations[it], origin) }
-            .thenByDescending { observations[it].sharpness }.thenBy { it })
+        // Reserve a sharp view for registration and single-frame fallback
+        // before the directional extremes spend the remaining memory budget.
+        selected += candidates.minWith(compareByDescending<Int> { observations[it].sharpness }
+            .thenBy { distance(observations[it], origin) }.thenBy { it })
         val extremes = listOf(
             candidates.maxBy { observations[it].x }, candidates.minBy { observations[it].x },
             candidates.maxBy { observations[it].y }, candidates.minBy { observations[it].y },

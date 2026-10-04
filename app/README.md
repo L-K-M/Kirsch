@@ -30,12 +30,12 @@ If a kept view is evicted before its `CaptureResult` arrives — the reader hold
 Accepted YUV acquisitions enter a process-death-recoverable single-worker queue. Processing:
 
 1. verifies every selected payload and metadata file against its recorded byte count and SHA-256
-2. selects up to five views covering the origin and directional extrema, then fills by displacement diversity; older packages without sweep positions retain time-spaced selection
+2. retains the sharpest recorded sweep view, then selects directional extrema and fills by displacement diversity, up to five views; equal sharpness favors the origin and older packages without sweep positions retain time-spaced selection
 3. selects the sharpest measured frame as reference and rejects substantially blurred views
 4. registers views with ORB and MAGSAC++ homographies, rejecting localized matches, implausible geometry, and excessive reprojection error
 5. matches rendered brightness from robust corresponding pixels; sensor exposure products remain evidence, rather than being multiplied into already tone-mapped YUV pixels
-6. applies conservative glare-aware temporal selection and averages only views that agree in both brightness and color; confidence counts actual contributors and validity excludes interpolation across image borders
-7. detects print quadrilaterals and rectifies the largest candidate using recorded camera geometry where available, including single-axis tilt; manual correction uses the same calibration
+6. preserves the unwarped reference and averages views agreeing in brightness and color; reference glare replacement requires two agreeing lower observations, compatible brightening, and spatial support, reducing switching artifacts at misaligned fine detail; confidence counts actual contributors and validity excludes interpolation across image borders
+7. detects print boundaries across grayscale and color contrast, closes small edge gaps, fits supported straight sides around rounded corners, and rectifies the largest quadrilateral using recorded camera geometry where available, including single-axis tilt; manual correction uses the same calibration
 8. writes a high-quality JPEG and a 16-bit TIFF container, with native allocations released on processing failures
 
 Camera crop coordinates start at the selected sensor array's origin, and lens calibration coordinates start at the pre-correction array's origin. Capture metadata records the actual distortion correction mode: OFF uses the pre-correction active array, while FAST and HIGH_QUALITY use the active array. Missing or unknown mode with differing arrays declines intrinsics. Pre-correction calibration is used only when it matches the selected array basis and has valid parameters with negligible skew; otherwise the recorded focal length and physical sensor size provide an estimate where available. Sensor and per-stream aspect cropping are mapped to the full output stream dimensions recorded in characteristics as `capture_size`. The packed `Image.cropRect` origin is then subtracted from the principal point without another rescale. Malformed or out-of-bounds sensor and packed crop metadata declines intrinsics.
@@ -54,6 +54,8 @@ The review screen provides draggable print corners (with a magnifier loupe while
 - classical 2× upscaling
 
 Corner drafts survive screen recreation. Save, rotation, and restoration wait until changed corners are applied, so the displayed draft cannot be silently discarded. Rotate clockwise creates a new JPEG and lossless TIFF companion; later cropping preserves that orientation, and repeated turns use the lossless companion. Confirmed physical dimensions swap with the output axes.
+
+Save to Photos stays in a fixed footer outside the scrolling image and editing controls. System-bar and keyboard insets keep it reachable with large text. The footer identifies the selected output and explains when unapplied corners block saving.
 
 Live edits and saves survive screen recreation without reopening controls early. The replacement screen reloads the committed image before becoming editable, and failed edits preserve the corner draft. Returning to a previously open review also refreshes the saved version. Gallery export uses application context and leaves the source derivative unchanged.
 

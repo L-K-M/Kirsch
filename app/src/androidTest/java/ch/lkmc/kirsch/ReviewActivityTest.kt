@@ -3,8 +3,10 @@ package ch.lkmc.kirsch
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.media.ExifInterface
 import android.net.Uri
 import android.os.SystemClock
@@ -14,8 +16,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.KeyEvent
+import android.view.WindowInsets
 import android.view.inspector.WindowInspector
 import android.widget.Button
+import android.widget.ScrollView
 import android.widget.TextView
 import ch.lkmc.kirsch.derivative.DerivativeStore
 import ch.lkmc.kirsch.scan.ScanGalleryExporter
@@ -435,6 +439,97 @@ class ReviewActivityTest : InstrumentationTestCase() {
         }
     }
 
+    fun testCorrectedScanCanBeSavedFromTheCornerEditorOnPhoneSizedScreen() {
+        val sourceWidth = 640
+        val sourceHeight = 697
+        val manifest = createScan("review", sourceWidth, sourceHeight)
+        openScan(manifest, sourceWidth, sourceHeight)
+        instrumentation.runOnMainSync {
+            val current = requireNotNull(activity)
+            val density = current.resources.displayMetrics.density
+            current.window.setLayout((320 * density).toInt(), (640 * density).toInt())
+            val root = current.window.decorView
+            val editor = requireNotNull(findView(root, CornerEditorView::class.java))
+            editor.setNormalizedPoints(listOf(
+                Point(0.35, 0.22), Point(0.84, 0.22), Point(0.84, 0.9), Point(0.35, 0.9),
+            ))
+            editor.onCornersChanged?.invoke()
+        }
+        instrumentation.waitForIdleSync()
+        val apply = reviewButton(R.string.apply_manual_corners)
+        instrumentation.runOnMainSync {
+            val bars = requireNotNull(apply.rootWindowInsets).getInsets(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+            apply.requestRectangleOnScreen(Rect(0, 0, apply.width, apply.height + bars.bottom), true)
+        }
+        instrumentation.waitForIdleSync()
+        logReviewViewport("Before applying corners")
+        assertVisibleView(reviewText(R.string.review_apply_before_save), "The disabled Save action should explain the pending crop")
+        tapVisibleButton(apply, "Apply Corners should be reachable while editing")
+        logReviewViewport("Immediately after applying corners")
+
+        val deadline = System.nanoTime() + 10_000_000_000L
+        var corrected = false
+        while (!corrected && System.nanoTime() < deadline) {
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = requireNotNull(activity).window.decorView
+                corrected = requireNotNull(findView(root, CornerEditorView::class.java)).isEnabled &&
+                    JSONObject(manifest.readText()).has("manual_quad")
+            }
+            if (!corrected) Thread.sleep(50)
+        }
+        assertTrue("The manual crop should finish", corrected)
+        logReviewViewport("After corrected preview reload")
+        assertVisibleView(reviewText(R.string.active_output_corrected), "Save should identify the corrected version")
+        val correctedRecord = JSONObject(manifest.readText())
+        val correctedPath = correctedRecord.getString("preview_path")
+        assertFalse("The correction must create a new deliverable", correctedPath == "active.jpg")
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(File(directory, correctedPath).absolutePath, bounds)
+        assertTrue(bounds.outWidth in 1 until sourceWidth)
+        assertTrue(bounds.outHeight in 1 until sourceHeight)
+
+        var galleryUri: Uri? = null
+        try {
+            // Do not scroll back to the former Save location: the user is
+            // still at Apply Corners when the corrected preview arrives.
+            tapVisibleButton(reviewButton(R.string.accept_scan), "Save should stay visible after applying corners")
+            val chooserDeadline = System.nanoTime() + 5_000_000_000L
+            var confirm: Button? = null
+            while (confirm == null && System.nanoTime() < chooserDeadline) {
+                instrumentation.waitForIdleSync()
+                instrumentation.runOnMainSync {
+                    confirm = WindowInspector.getGlobalWindowViews().filter { it.hasWindowFocus() }
+                        .flatMap(::descendants).filterIsInstance<Button>()
+                        .firstOrNull { it.id == android.R.id.button1 }
+                }
+                if (confirm == null) Thread.sleep(50)
+            }
+            tapVisibleButton(requireNotNull(confirm) { "Save should open the version chooser" }, "Confirm Save should be reachable")
+            awaitMessage(instrumentation.targetContext.getString(R.string.scan_accepted))
+            val accepted = JSONObject(manifest.readText())
+            galleryUri = Uri.parse(accepted.getJSONObject("extensions").getString("gallery_uri"))
+            assertEquals("accepted", accepted.getString("state"))
+            assertEquals("The corrected version should be selected by default", correctedPath,
+                accepted.getJSONObject("extensions").getString("gallery_source_path"))
+            val exported = requireNotNull(instrumentation.targetContext.contentResolver.openInputStream(galleryUri)).use {
+                requireNotNull(BitmapFactory.decodeStream(it))
+            }
+            try {
+                assertEquals(bounds.outWidth, exported.width)
+                assertEquals(bounds.outHeight, exported.height)
+            } finally {
+                exported.recycle()
+            }
+        } finally {
+            val savedUri = galleryUri ?: JSONObject(manifest.readText()).optJSONObject("extensions")
+                ?.optString("gallery_uri")?.takeIf(String::isNotBlank)?.let(Uri::parse)
+            savedUri?.let { instrumentation.targetContext.contentResolver.delete(it, null, null) }
+        }
+    }
+
     fun testFailedCornerApplicationKeepsTheDraftForCorrection() {
         openScan(createScan("review"))
         val draft = listOf(Point(0.1, 0.1), Point(0.1, 0.1), Point(0.9, 0.9), Point(0.1, 0.9))
@@ -475,10 +570,10 @@ class ReviewActivityTest : InstrumentationTestCase() {
         assertFalse(JSONObject(File(directory, "scan.json").readText()).has("manual_quad"))
     }
 
-    private fun createScan(state: String): File {
-        writeImage("working.jpg", Color.BLUE)
-        writeImage("active.jpg", Color.RED)
-        writeImage("saved.jpg", Color.GREEN)
+    private fun createScan(state: String, width: Int = 640, height: Int = 480): File {
+        writeImage("working.jpg", Color.BLUE, width, height)
+        writeImage("active.jpg", Color.RED, width, height)
+        writeImage("saved.jpg", Color.GREEN, width, height)
         val record = JSONObject()
             .put("scan_id", "test-scan")
             .put("state", state)
@@ -498,18 +593,94 @@ class ReviewActivityTest : InstrumentationTestCase() {
         return File(directory, "scan.json").apply { writeText(record.toString()) }
     }
 
-    private fun writeImage(name: String, color: Int) {
-        val bitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
+    private fun reviewButton(text: Int): Button {
+        return reviewText(text) as Button
+    }
+
+    private fun reviewText(text: Int): TextView {
+        var label: TextView? = null
+        instrumentation.runOnMainSync {
+            label = descendants(requireNotNull(activity).window.decorView).filterIsInstance<TextView>()
+                .single { it.text == instrumentation.targetContext.getString(text) }
+        }
+        return requireNotNull(label)
+    }
+
+    private fun tapVisibleButton(button: Button, message: String) {
+        assertVisibleView(button, message)
+        val location = IntArray(2)
+        var enabled = false
+        instrumentation.runOnMainSync {
+            enabled = button.isEnabled
+            button.getLocationOnScreen(location)
+            location[0] += button.width / 2
+            location[1] += button.height / 2
+        }
+        assertTrue("$message: button is disabled", enabled)
+        val start = SystemClock.uptimeMillis()
+        listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEach { action ->
+            val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action,
+                location[0].toFloat(), location[1].toFloat(), 0)
+            instrumentation.sendPointerSync(event)
+            event.recycle()
+        }
+    }
+
+    private fun assertVisibleView(view: View, message: String) {
+        val visible = Rect()
+        val location = IntArray(2)
+        val safeWindow = Rect()
+        var fullyVisible = false
+        instrumentation.runOnMainSync {
+            fullyVisible = view.getGlobalVisibleRect(visible) &&
+                visible.width() == view.width && visible.height() == view.height
+            view.getLocationOnScreen(location)
+            val root = view.rootView
+            val rootLocation = IntArray(2)
+            root.getLocationOnScreen(rootLocation)
+            val bars = requireNotNull(root.rootWindowInsets).getInsets(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+            safeWindow.set(rootLocation[0] + bars.left, rootLocation[1] + bars.top,
+                rootLocation[0] + root.width - bars.right, rootLocation[1] + root.height - bars.bottom)
+            fullyVisible = fullyVisible && safeWindow.contains(Rect(location[0], location[1],
+                location[0] + view.width, location[1] + view.height))
+        }
+        assertTrue("$message: visible bounds are $visible, safe window is $safeWindow", fullyVisible)
+    }
+
+    private fun logReviewViewport(stage: String) {
+        var details = ""
+        instrumentation.runOnMainSync {
+            val current = requireNotNull(activity)
+            val root = current.window.decorView
+            val scroll = requireNotNull(findView(root, ScrollView::class.java))
+            val bars = root.rootWindowInsets?.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            val actions = descendants(root).filterIsInstance<Button>().filter {
+                it.text == current.getString(R.string.accept_scan) || it.text == current.getString(R.string.apply_manual_corners)
+            }.map { button ->
+                val visible = Rect()
+                val shown = button.getGlobalVisibleRect(visible)
+                "${button.text} enabled=${button.isEnabled} visible=$shown bounds=$visible size=${button.width}x${button.height}"
+            }
+            details = "$stage fontScale=${current.resources.configuration.fontScale} bars=$bars scrollY=${scroll.scrollY} " +
+                "viewport=${scroll.width}x${scroll.height} actions=$actions"
+        }
+        Log.i("KirschSaveVisibilityTest", details)
+    }
+
+    private fun writeImage(name: String, color: Int, width: Int = 640, height: Int = 480) {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(color)
         File(directory, name).outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         bitmap.recycle()
     }
 
-    private fun openScan(manifest: File) {
+    private fun openScan(manifest: File, pixelWidth: Int = 640, pixelHeight: Int = 480) {
         activity = instrumentation.startActivitySync(
             ReviewActivity.intent(instrumentation.targetContext, manifest).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-        awaitLoaded()
+        awaitLoaded(pixelWidth, pixelHeight)
     }
 
     private fun recreateReview() {

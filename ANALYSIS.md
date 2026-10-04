@@ -21,6 +21,68 @@ crash), **[S2]** significant (quality, performance or UX cost a user notices),
 
 ---
 
+## 2026-10-04 exported-capture follow-up
+
+A user-provided screenshot and acquisition ZIP exposed three remaining
+problems. The ten 3344 × 3072 I420 observations and their metadata were
+verified against recorded hashes and replayed privately through the bundled
+OpenCV 4.10 Android pipeline. The ZIP contained acquisition files, not an
+already processed product; reported output comparisons are native replays.
+Photo bytes and the temporary replay harness are excluded from the repository.
+
+- **Save reachability:** all controls shared the review scroll area, and its
+  system-bar handling could leave Save partly occluded after applying corners.
+  A 320 × 640 portrait emulator at 1.8× font scale reproduced a post-crop Save
+  rectangle starting above the safe window. Save now stays in an inset-aware
+  footer, identifies the selected version, and explains pending corners. The
+  regression uses actual Apply/Save taps and verifies the corrected JPEG's
+  MediaStore source and dimensions.
+- **Missed outer boundary:** grayscale-only edges did not join around the
+  light rounded card on wood. Color-plane edges with bounded gap closing and
+  intersections of supported straight sides recover the outer corners.
+  Procedural native tests cover weak grayscale contrast, rounded boundaries,
+  perspective, an oval, and a clipped background, with two observed failures
+  before correction. The actual replay now crops the complete card.
+- **Discarded sharp view and fusion artifacts:** the five-view budget omitted
+  the strongest recorded sweep sharpness. Reserve that view before filling
+  directional coverage. Even after this selection correction, per-pixel
+  median/low anchoring introduced speckle and halos at residual alignment
+  errors. Ordinary pixels now retain the unwarped reference; replacement
+  requires two agreeing lower views, compatible brightening, and a spatially
+  supported highlight. A native antialiased-print regression failed with RGB
+  MAE 5.015 at a 0.75-pixel residual before correction and now measures 0.131;
+  1.5- and 3-pixel controls measure 0.070 and 0.046. The unchanged synthetic
+  moving-glare comparator still improves RGB error by 95.14%.
+
+Native-resolution face and lettering inspection confirms removal of the
+switching artifact in this physical acquisition. In the same inner-card ROI,
+the sharper-reference candidate before the fusion correction had mean RGB
+change 8.75 and maximum channel change 149. After correction these are 1.67
+and 11, with no pixels changing by more than 16. These measure reference
+preservation, not error against the physical print. The final output is upright
+and automatically cropped to 1378 × 2136. Derivative hashes and sizes match,
+and the TIFF exactly reproduces the rectified working image in its 16-bit
+container. Processing took 7.075 seconds in one API 35 arm64 emulator replay,
+compared with 4.257 seconds before spatial fusion support was added; this is
+not physical-device timing. The added fusion mask costs one byte per pixel.
+
+This acquisition records physical camera 2 behind logical camera 0, with
+unusable explicit intrinsics. Processing correctly declines mismatched
+calibration, so metric aspect correction remains unverified for this device.
+The sweep also stopped with one direction slightly short of its target.
+Multiple broad shadows can resemble reference glare, and small highlights
+without enough supporting views deliberately retain the reference. Further
+matched Kirsch, stock-camera, and PhotoScan captures are still needed before
+claiming general superiority, improved delivered resolution, or reliable
+recovery of every glossy-print reflection.
+
+Final local verification passes 103 JVM tests, 67 native tests on API 35
+arm64 at normal font size, 26 Python tests, fixture validation, debug assembly,
+and lint. The full 14-test review suite also passes at 1.8× font scale;
+the final corrected-image Save regression is checked again at that scale.
+The physical acquisition itself is replay evidence; capture and performance
+on its original phone remain unverified.
+
 ## 2026-10-03 quality review
 
 The current review covered acquisition, sweep selection, registration, fusion,

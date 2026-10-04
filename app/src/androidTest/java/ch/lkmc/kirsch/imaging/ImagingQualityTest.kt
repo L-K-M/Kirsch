@@ -65,6 +65,152 @@ class ImagingQualityTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSmallResidualShiftsPreserveOrdinaryPrintDetail() {
+        val reference = printedDetailImage()
+        try {
+            for (residualPixels in listOf(0.0, 0.75, 1.5, 3.0)) {
+                // Registration can leave local sampling errors without glare.
+                // A displaced dark letter must not replace the sharp reference.
+                val images = listOf(reference.clone()) + listOf(1.0, -1.0).map { direction ->
+                    val transform = Mat.eye(2, 3, CvType.CV_64FC1)
+                    transform.put(0, 2, direction * residualPixels)
+                    transform.put(1, 2, -direction * residualPixels / 2)
+                    try {
+                        Mat().also {
+                            Imgproc.warpAffine(
+                                reference, it, transform, reference.size(),
+                                Imgproc.INTER_LINEAR, Core.BORDER_REPLICATE,
+                            )
+                        }
+                    } finally {
+                        transform.release()
+                    }
+                }
+                val masks = images.map { Mat(reference.size(), CvType.CV_8UC1, Scalar.all(255.0)) }
+                val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0)
+                val difference = Mat()
+                try {
+                    Core.absdiff(reference, result.image, difference)
+                    val error = Core.mean(difference).`val`.take(3).average()
+                    Log.i("KirschQualityTest", "ordinary_print residual_px=$residualPixels fused_rgb_mae=$error")
+                    assertTrue("Residual shifts changed ordinary print detail: $error at $residualPixels px", error < 1.0)
+                    assertTrue(
+                        "Fusion invented large color changes without glare at $residualPixels px",
+                        Core.norm(reference, result.image, Core.NORM_INF) <= 16.0,
+                    )
+                } finally {
+                    difference.release()
+                    images.forEach(Mat::release)
+                    masks.forEach(Mat::release)
+                    result.image.release()
+                    result.confidence.release()
+                    result.failure.release()
+                }
+            }
+        } finally {
+            reference.release()
+        }
+    }
+
+    fun testTwoCleanViewsRemoveBroadReferenceGlare() {
+        val clean = Mat(96, 96, CvType.CV_8UC3, Scalar(100.0, 120.0, 140.0))
+        val reference = clean.clone()
+        Imgproc.rectangle(reference, Point(20.0, 20.0), Point(75.0, 75.0), Scalar(170.0, 190.0, 210.0), -1)
+        val images = listOf(reference, clean.clone(), clean.clone())
+        val masks = images.map { Mat(clean.size(), CvType.CV_8UC1, Scalar.all(255.0)) }
+        val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0)
+        try {
+            assertEquals(0.0, Core.norm(clean, result.image, Core.NORM_INF))
+            assertEquals(170.0, result.confidence.get(48, 48)[0])
+        } finally {
+            clean.release()
+            images.forEach(Mat::release)
+            masks.forEach(Mat::release)
+            result.image.release()
+            result.confidence.release()
+            result.failure.release()
+        }
+    }
+
+    fun testOneDarkerShadowDoesNotReplaceReference() {
+        val reference = Mat(96, 96, CvType.CV_8UC3, Scalar(100.0, 120.0, 140.0))
+        val shadow = reference.clone()
+        Imgproc.rectangle(shadow, Point(20.0, 20.0), Point(75.0, 75.0), Scalar(40.0, 60.0, 80.0), -1)
+        val images = listOf(reference, shadow, reference.clone())
+        val masks = images.map { Mat(reference.size(), CvType.CV_8UC1, Scalar.all(255.0)) }
+        val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0)
+        try {
+            assertEquals(0.0, Core.norm(reference, result.image, Core.NORM_INF))
+        } finally {
+            images.forEach(Mat::release)
+            masks.forEach(Mat::release)
+            result.image.release()
+            result.confidence.release()
+            result.failure.release()
+        }
+    }
+
+    fun testOneCleanViewCannotRemoveReferenceGlare() {
+        val clean = Mat(96, 96, CvType.CV_8UC3, Scalar(100.0, 120.0, 140.0))
+        val reference = clean.clone()
+        Imgproc.rectangle(reference, Point(20.0, 20.0), Point(75.0, 75.0), Scalar(170.0, 190.0, 210.0), -1)
+        val images = listOf(reference, clean.clone(), reference.clone())
+        val masks = images.map { Mat(clean.size(), CvType.CV_8UC1, Scalar.all(255.0)) }
+        val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0)
+        try {
+            assertEquals(0.0, Core.norm(reference, result.image, Core.NORM_INF))
+        } finally {
+            clean.release()
+            images.forEach(Mat::release)
+            masks.forEach(Mat::release)
+            result.image.release()
+            result.confidence.release()
+            result.failure.release()
+        }
+    }
+
+    fun testMaskedCleanViewCannotAuthorizeGlareRemoval() {
+        val clean = Mat(96, 96, CvType.CV_8UC3, Scalar(100.0, 120.0, 140.0))
+        val reference = clean.clone()
+        Imgproc.rectangle(reference, Point(20.0, 20.0), Point(75.0, 75.0), Scalar(170.0, 190.0, 210.0), -1)
+        val images = listOf(reference, clean.clone(), clean.clone())
+        val masks = listOf(
+            Mat(clean.size(), CvType.CV_8UC1, Scalar.all(255.0)),
+            Mat(clean.size(), CvType.CV_8UC1, Scalar.all(255.0)),
+            Mat.zeros(clean.size(), CvType.CV_8UC1),
+        )
+        val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0, contributingFrameCount = 2)
+        try {
+            assertEquals(0.0, Core.norm(reference, result.image, Core.NORM_INF))
+        } finally {
+            clean.release()
+            images.forEach(Mat::release)
+            masks.forEach(Mat::release)
+            result.image.release()
+            result.confidence.release()
+            result.failure.release()
+        }
+    }
+
+    fun testBroadColorDisagreementDoesNotMasqueradeAsGlare() {
+        val reference = Mat(96, 96, CvType.CV_8UC3, Scalar(140.0, 160.0, 180.0))
+        // Lower luma with a brighter blue channel changes hue, rather than
+        // removing a neutral reflection from the reference's surface.
+        val other = Mat(96, 96, CvType.CV_8UC3, Scalar(180.0, 80.0, 80.0))
+        val images = listOf(reference, other, other.clone())
+        val masks = images.map { Mat(reference.size(), CvType.CV_8UC1, Scalar.all(255.0)) }
+        val result = ConservativeFusion.fuse(images, masks, referenceIndex = 0)
+        try {
+            assertEquals(0.0, Core.norm(reference, result.image, Core.NORM_INF))
+        } finally {
+            images.forEach(Mat::release)
+            masks.forEach(Mat::release)
+            result.image.release()
+            result.confidence.release()
+            result.failure.release()
+        }
+    }
+
     fun testBlurredMiddleFrameDoesNotBecomeReference() {
         val sharp = texturedImage()
         val blurred = Mat()
@@ -220,6 +366,23 @@ class ImagingQualityTest : InstrumentationTestCase() {
         val random = Random(93)
         val pixels = ByteArray(320 * 320 * 3) { (80 + random.nextInt(100)).toByte() }
         return Mat(320, 320, CvType.CV_8UC3).also { it.put(0, 0, pixels) }
+    }
+
+    private fun printedDetailImage(): Mat {
+        val image = Mat(320, 320, CvType.CV_8UC3, Scalar(220.0, 224.0, 220.0))
+        Imgproc.putText(image, "SCAN", Point(15.0, 58.0), Imgproc.FONT_HERSHEY_COMPLEX, 1.05, Scalar.all(24.0), 2, Imgproc.LINE_AA)
+        Imgproc.putText(image, "DETAIL", Point(15.0, 112.0), Imgproc.FONT_HERSHEY_COMPLEX, 1.05, Scalar.all(24.0), 2, Imgproc.LINE_AA)
+        listOf(Scalar(20.0, 205.0, 235.0), Scalar(50.0, 55.0, 190.0), Scalar(180.0, 100.0, 50.0)).forEachIndexed { index, color ->
+            val left = 180.0 + index * 50.0
+            Imgproc.rectangle(image, Point(left, 145.0), Point(left + 20.0, 290.0), color, -1)
+        }
+        for (y in 150 until 290 step 8) {
+            for (x in 25 until 150 step 8) {
+                val color = if ((x / 8 + y / 8) % 2 == 0) Scalar.all(30.0) else Scalar(65.0, 85.0, 145.0)
+                Imgproc.circle(image, Point(x.toDouble(), y.toDouble()), 2, color, -1, Imgproc.LINE_AA)
+            }
+        }
+        return image
     }
 
     private fun texturedImage(): Mat {
