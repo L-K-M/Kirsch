@@ -67,14 +67,24 @@ sampling, which can miss shorter peaks. Camera capture and review UI were
 outside the measured interval; physical device performance remains unverified.
 
 The final candidate's local checks cover 102 JVM tests, 55 native tests on an
-API 36 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
+API 35 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
 and lint pass; lint retains 11 warnings and reports no errors. Native review
 tests include a real photo-library export, unchanged source bytes, EXIF,
 selected-version acceptance, failed-edit draft preservation, and screen
 recreation or resumption while work completes. Four native capture-callback
 tests also check immediate request reservation, delayed completion, active
 capture navigation, and normal idle review. CI separately exercises native
-tests on an API 35 x86_64 emulator.
+tests on an API 35 x86_64 emulator. The same application source also passed
+the full native suite and actual Camera2 captures on API 36 arm64 before
+the final test-diagnostic update.
+
+One API 35 x86_64 CI run failed the save-version chooser's five-second
+accessibility-title lookup. The original oracle passed three API 35 arm64
+controls: chooser alone, after capture callbacks, and in the full native
+suite. The CI failure remains unreproduced and its cause unconfirmed. The
+test now asserts Save is ready before clicking and records control, window,
+and query-timing evidence; CI retains raw native results and logs. No
+production change or timeout increase is claimed as a fix for that failure.
 
 Actual Camera2 quick and fixed nine-frame captures of the emulator's virtual
 room verified that upright preview and finished review agree at 960 × 1280

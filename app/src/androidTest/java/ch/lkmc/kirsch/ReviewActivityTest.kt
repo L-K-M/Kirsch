@@ -9,10 +9,12 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.KeyEvent
+import android.view.inspector.WindowInspector
 import android.widget.Button
 import android.widget.TextView
 import ch.lkmc.kirsch.derivative.DerivativeStore
@@ -320,33 +322,77 @@ class ReviewActivityTest : InstrumentationTestCase() {
 
     fun testSaveChooserPreventsConcurrentEditsAndCancelReturnsToReview() {
         openScan(createScan("review"))
+        var saveEnabled = false
+        var beforeClick = ""
+        var afterClick = ""
+        var saveDisabledAfterFirstClick = false
+        var editsDisabled = false
         instrumentation.runOnMainSync {
             val save = descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
                 .single { it.text == instrumentation.targetContext.getString(R.string.accept_scan) }
+            saveEnabled = save.isEnabled
+            beforeClick = chooserActionState()
+            if (!saveEnabled) return@runOnMainSync
             save.performClick()
-            assertFalse(save.isEnabled)
+            saveDisabledAfterFirstClick = !save.isEnabled
             save.performClick()
-            assertTrue(descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
-                .all { !it.isEnabled })
+            editsDisabled = descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
+                .all { !it.isEnabled }
+            afterClick = chooserActionState()
         }
+        Log.i("KirschChooserTest", "Before click: $beforeClick")
+        assertTrue("Save should be ready before clicking: $beforeClick", saveEnabled)
+        Log.i("KirschChooserTest", "After click: $afterClick")
+        assertTrue("The first Save click should disable saving: $afterClick", saveDisabledAfterFirstClick)
+        assertTrue("Opening the chooser should disable concurrent edits: $afterClick", editsDisabled)
         val deadline = System.nanoTime() + 5_000_000_000L
         var chooserOpened = false
+        val queries = mutableListOf<String>()
         while (!chooserOpened && System.nanoTime() < deadline) {
             instrumentation.waitForIdleSync()
-            chooserOpened = instrumentation.uiAutomation.rootInActiveWindow
-                ?.findAccessibilityNodeInfosByText(instrumentation.targetContext.getString(R.string.save_version_title))
-                ?.isNotEmpty() == true
+            val started = SystemClock.elapsedRealtime()
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val matches = root?.findAccessibilityNodeInfosByText(instrumentation.targetContext.getString(R.string.save_version_title))
+            chooserOpened = matches?.isNotEmpty() == true
+            queries += "${SystemClock.elapsedRealtime() - started}ms window=${root?.windowId} matches=${matches?.size}"
             if (!chooserOpened) Thread.sleep(50)
         }
-        assertTrue("Save should offer the stored versions", chooserOpened)
+        val diagnostics = chooserDiagnostics(queries)
+        diagnostics.chunked(3000).forEach { Log.i("KirschChooserTest", it) }
+        assertTrue("Save should offer the stored versions: $diagnostics", chooserOpened)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         instrumentation.waitForIdleSync()
+        var saveEnabledAfterCancel = false
         instrumentation.runOnMainSync {
             val save = descendants(requireNotNull(activity).window.decorView).filterIsInstance<Button>()
                 .single { it.text == instrumentation.targetContext.getString(R.string.accept_scan) }
-            assertTrue(save.isEnabled)
+            saveEnabledAfterCancel = save.isEnabled
         }
+        assertTrue("Cancel should return to review: $diagnostics", saveEnabledAfterCancel)
         assertEquals("review", JSONObject(File(directory, "scan.json").readText()).getString("state"))
+    }
+
+    private fun chooserActionState(): String {
+        val current = requireNotNull(activity)
+        val state = listOf("operationInProgress", "loadGeneration", "editable", "resumedBefore").associateWith { name ->
+            ReviewActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.get(current)
+        }
+        val status = ReviewActivity::class.java.getDeclaredField("status").apply { isAccessible = true }
+            .get(current) as TextView
+        val buttons = descendants(current.window.decorView).filterIsInstance<Button>()
+            .map { "${it.text} [enabled=${it.isEnabled}]" }
+        return "$state focus=${current.hasWindowFocus()} finishing=${current.isFinishing} destroyed=${current.isDestroyed} status=${status.text} buttons=$buttons"
+    }
+
+    private fun chooserDiagnostics(queries: List<String>): String {
+        var localWindows = ""
+        instrumentation.runOnMainSync {
+            localWindows = "state=${chooserActionState()} localWindows=" + WindowInspector.getGlobalWindowViews().map { root ->
+                "focus=${root.hasWindowFocus()} shown=${root.isShown} texts=" +
+                    descendants(root).filterIsInstance<TextView>().map { it.text.toString() }
+            }
+        }
+        return "$localWindows queries=$queries"
     }
 
     fun testApplyingReorderedCornersClearsTheDraftAndEnablesSaving() {
