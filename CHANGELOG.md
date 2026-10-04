@@ -8,6 +8,7 @@
 - Correct calibrated print shape at single-axis tilt and preserve full-frame pixels.
 - Normalize crop and calibration origins, select the basis from actual distortion mode, and decline ambiguous camera geometry.
 - Show and zoom the finished scan, preserve crop drafts, and add reversible rotation.
+- Keep captured scans upright through rectification, review, editing, and export.
 - Keep live edits and saves consistent across review recreation and resumption.
 - Report incomplete camera calibration as validation errors instead of crashing.
 - Offer failed-scan retry and guard editing and photo-library publication.

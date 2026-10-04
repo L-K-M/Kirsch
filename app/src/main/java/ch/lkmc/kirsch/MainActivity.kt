@@ -147,7 +147,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             ?: getString(R.string.unassigned_print_id)
         pendingReviewScanId = null
         statusChip.visibility = View.GONE
-        controller.capture(printId)
+        controller.capture(printId, textureView.display?.rotation ?: Surface.ROTATION_0)
     }
 
     // Camera2BurstController.Listener

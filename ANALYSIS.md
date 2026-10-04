@@ -39,6 +39,7 @@ recovery. It found concrete ways the processing could make a photograph worse:
 | Localized matches or border interpolation contaminate fusion | Reject unsafe homography support/geometry and exclude partially interpolated borders. Native registration tests cover localized matches and known shifts. |
 | Single-axis tilt stretches a print | Record sensor geometry and normalize crop and calibration coordinates to the selected array origin. Actual distortion mode chooses the pre-correction array for OFF and the active array for FAST/HIGH_QUALITY; unknown mode with differing arrays declines intrinsics. Calibrate at the full stream size recorded in characteristics, then subtract the packed image crop origin without rescaling. Malformed or out-of-bounds sensor and packed crops decline intrinsics. Preserve calibrated shape in automatic and manual rectification. Native metadata and synthetic 35° pitch/yaw regressions observed failing before correction. |
 | Review never shows the deliverable | Show the actual active or exported version with zoom and dimensions, explain fallback, and retain crop drafts. Native UI tests check actual rendered pixels and screen recreation. |
+| Portrait capture is upright in preview but sideways in review | Record rear-camera sensor and display orientation at capture, request unrotated sensor pixels, and rotate finished images and maps after rectification. Keep working pixels and calibration in sensor coordinates. A real emulator capture reproduced the mismatch; native pixel, edit, and metadata regressions observed failing before correction. |
 | Sideways photos cannot be corrected | Add reversible rotation with lossless companions; preserve orientation through crop and physical-scale metadata. Native processing/UI tests cover dimensions and visible results. |
 | Saving an older version keeps the current version's orientation and scale | Accept the selected image as the active output and derive its sampling frequency from its dimensions. Native regression observed the rotated physical width before correction. |
 | Recreating review during an edit enables controls over a stale preview | Retain live operations independently of the Activity, keep controls busy, and reload the committed image before enabling them. Native rotation/recreation regression observed failing before correction. |
@@ -64,13 +65,24 @@ rose from 5.53 MiB to 358.43 MiB. This was one synthetic run with 500 ms
 sampling, which can miss shorter peaks. Camera capture and review UI were
 outside the measured interval; physical device performance remains unverified.
 
-The final candidate's local checks cover 100 JVM tests, 49 native tests on an
+The final candidate's local checks cover 102 JVM tests, 51 native tests on an
 API 36 arm64 emulator, and 26 Python benchmark/validator tests. Debug assembly
 and lint pass; lint retains 11 warnings and reports no errors. Native review
 tests include a real photo-library export, unchanged source bytes, EXIF,
 selected-version acceptance, failed-edit draft preservation, and screen
 recreation or resumption while work completes. CI separately exercises native
 tests on an API 35 x86_64 emulator.
+
+Actual Camera2 quick and fixed nine-frame captures of the emulator's virtual
+room verified that upright preview and finished review agree at 960 × 1280
+pixels. Working images remain 1280 × 960 in sensor coordinates, with sensor
+orientation 90°, display rotation 0°, and one clockwise output turn. Every
+frame reported `ROTATE_AND_CROP_NONE`; TIFF pixels exactly match the working
+image after that rotation, and recorded sizes and hashes agree. The burst
+accepted all nine views, registered five, and fused them. This verifies the
+stable rear-camera path on the emulator, with no injected capture fixture;
+the default displacement-driven sweep, dynamic fold, and physical-camera
+orientation switches remain unverified by this smoke test.
 
 Automated review suggested accepting failed-focus captures as a fallback.
 That suggestion was rejected because it conflicts with the quality goal.

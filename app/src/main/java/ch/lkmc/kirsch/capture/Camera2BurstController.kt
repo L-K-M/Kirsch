@@ -180,7 +180,7 @@ class Camera2BurstController(
         }
     }
 
-    fun capture(printId: String) {
+    fun capture(printId: String, displayRotation: Int) {
         cameraHandler.post {
             if (activeWriter != null || lockPlan != null) {
                 status("A burst is already in progress")
@@ -198,6 +198,9 @@ class Camera2BurstController(
                 Instant.now(),
                 UUID.randomUUID().toString().take(8),
             )
+            val sensorOrientation = runCatching {
+                cameraManager.getCameraCharacteristics(currentConfig.cameraId).get(CameraCharacteristics.SENSOR_ORIENTATION)
+            }.getOrNull() ?: currentConfig.characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
             val writer = try {
                 CapturePackageWriter(
                     context,
@@ -206,7 +209,12 @@ class Camera2BurstController(
                     currentConfig.mode,
                     requestedProfile.frameCount,
                     currentConfig.characteristics,
-                    cameraJson(currentConfig),
+                    cameraJson(currentConfig)
+                        .put("capture_display_rotation_degrees", displayRotation * 90)
+                        .put("capture_sensor_orientation_degrees", sensorOrientation)
+                        .put("capture_output_rotation_quarter_turns", CaptureOrientation.clockwiseQuarterTurns(
+                            sensorOrientation, displayRotation,
+                        )),
                     requestedProfile,
                 )
             } catch (error: Exception) {
@@ -433,6 +441,7 @@ class Camera2BurstController(
         val surface = previewSurface ?: return
         val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
             addTarget(surface)
+            disableRotateAndCrop(this, selected)
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
@@ -561,6 +570,7 @@ class Camera2BurstController(
         plan: LockPlan,
     ): CaptureRequest = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
         addTarget(previewSurface ?: error("Preview surface missing"))
+        disableRotateAndCrop(this, selected)
         set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
@@ -917,11 +927,21 @@ class Camera2BurstController(
         imageHandler.post { sweep.analyzer.release() }
     }
 
+    private fun disableRotateAndCrop(builder: CaptureRequest.Builder, selected: CameraConfig) {
+        val modes = selected.characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES)
+        if (modes?.contains(CaptureRequest.SCALER_ROTATE_AND_CROP_NONE) == true) {
+            // YUV must retain the sensor coordinate system used by calibration
+            // and corners. Output orientation is applied after rectification.
+            builder.set(CaptureRequest.SCALER_ROTATE_AND_CROP, CaptureRequest.SCALER_ROTATE_AND_CROP_NONE)
+        }
+    }
+
     private fun applyLockedValues(
         builder: CaptureRequest.Builder,
         selected: CameraConfig,
         locked: TotalCaptureResult,
     ) {
+        disableRotateAndCrop(builder, selected)
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         var exposure = locked.get(CaptureResult.SENSOR_EXPOSURE_TIME)
         var sensitivity = locked.get(CaptureResult.SENSOR_SENSITIVITY)
@@ -1179,6 +1199,7 @@ class Camera2BurstController(
         try {
             val cancel = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(previewSurface ?: return)
+                disableRotateAndCrop(this, selected)
                 set(CaptureRequest.CONTROL_AF_MODE, selected.focusLockMode)
                 if (selected.focusLockAvailable) {
                     set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)

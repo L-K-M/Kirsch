@@ -19,6 +19,8 @@ The controller prefers AWB lock over replaying result-reported gains, waits for 
 
 This shutter adjustment targets detected 50 Hz mains lighting. General PWM lighting and anti-flicker period quantization of longer ISO-limited exposures remain outside this adjustment.
 
+Capture records the rear-camera sensor orientation and display rotation at shutter time. When supported, preview and capture requests disable automatic rotate-and-crop so working pixels and calibration share the sensor coordinate system. Finished images and confidence/failure maps are rotated after rectification, and later edits and exports retain that orientation. The stable rear-camera path is verified on an emulator; dynamic fold and physical-camera orientation switches still need device verification. Older packages without capture orientation retain their original behavior.
+
 If a kept view is evicted before its `CaptureResult` arrives — the reader holds only six full-resolution buffers, so a slow write path can exhaust them — the loss is recorded as a warning and the deliverable count follows it down. A sweep degrades to a shorter stack rather than failing the whole capture, and the shortfall is visible in the manifest as the gap between `extensions.warnings` and the kept count.
 
 ## Processing
