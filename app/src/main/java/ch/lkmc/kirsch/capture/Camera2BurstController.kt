@@ -58,6 +58,9 @@ class Camera2BurstController(
         val analyzer: SweepFrameAnalyzer,
         val policy: SweepPolicy,
     ) {
+        // Accessed only by the camera handler, just like the timestamp pairer.
+        val keptPositions = mutableMapOf<Long, SweepFramePosition>()
+
         @Volatile
         var stopped = false
     }
@@ -89,6 +92,12 @@ class Camera2BurstController(
             adjustableFocus && afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)
         val continuousFocusAvailable: Boolean =
             adjustableFocus && afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        val focusLockAvailable: Boolean = autoFocusLockAvailable || continuousFocusAvailable
+        val focusLockMode: Int = when {
+            autoFocusLockAvailable -> CaptureRequest.CONTROL_AF_MODE_AUTO
+            continuousFocusAvailable -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            else -> CaptureRequest.CONTROL_AF_MODE_OFF
+        }
         val aeLockAvailable: Boolean =
             characteristics.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
         val awbLockAvailable: Boolean =
@@ -171,7 +180,12 @@ class Camera2BurstController(
         }
     }
 
-    fun capture(printId: String) {
+    /** Reserves the request identity before queued camera work; failures still report through the listener. */
+    fun capture(printId: String, displayRotation: Int): String {
+        val captureId = CaptureIdentity.captureId(
+            Instant.now(),
+            UUID.randomUUID().toString().take(8),
+        )
         cameraHandler.post {
             if (activeWriter != null || lockPlan != null) {
                 status("A burst is already in progress")
@@ -185,10 +199,9 @@ class Camera2BurstController(
                 return@post
             }
             val normalizedPrintId = CaptureIdentity.normalizePrintId(printId)
-            val captureId = CaptureIdentity.captureId(
-                Instant.now(),
-                UUID.randomUUID().toString().take(8),
-            )
+            val sensorOrientation = runCatching {
+                cameraManager.getCameraCharacteristics(currentConfig.cameraId).get(CameraCharacteristics.SENSOR_ORIENTATION)
+            }.getOrNull() ?: currentConfig.characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
             val writer = try {
                 CapturePackageWriter(
                     context,
@@ -197,7 +210,12 @@ class Camera2BurstController(
                     currentConfig.mode,
                     requestedProfile.frameCount,
                     currentConfig.characteristics,
-                    cameraJson(currentConfig),
+                    cameraJson(currentConfig)
+                        .put("capture_display_rotation_degrees", displayRotation * 90)
+                        .put("capture_sensor_orientation_degrees", sensorOrientation)
+                        .put("capture_output_rotation_quarter_turns", CaptureOrientation.clockwiseQuarterTurns(
+                            sensorOrientation, displayRotation,
+                        )),
                     requestedProfile,
                 )
             } catch (error: Exception) {
@@ -237,6 +255,7 @@ class Camera2BurstController(
                 }
             }, LOCK_TIMEOUT_MS)
         }
+        return captureId
     }
 
     fun stop() {
@@ -424,6 +443,7 @@ class Camera2BurstController(
         val surface = previewSurface ?: return
         val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
             addTarget(surface)
+            disableRotateAndCrop(this, selected)
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
@@ -552,13 +572,14 @@ class Camera2BurstController(
         plan: LockPlan,
     ): CaptureRequest = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
         addTarget(previewSurface ?: error("Preview surface missing"))
+        disableRotateAndCrop(this, selected)
         set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         set(CaptureRequest.CONTROL_AE_LOCK, selected.aeLockAvailable)
         set(CaptureRequest.CONTROL_AWB_LOCK, selected.awbLockAvailable)
-        if (selected.autoFocusLockAvailable) {
-            set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+        if (selected.focusLockAvailable) {
+            set(CaptureRequest.CONTROL_AF_MODE, selected.focusLockMode)
             set(CaptureRequest.CONTROL_AF_TRIGGER, afTrigger)
         } else {
             set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
@@ -593,8 +614,8 @@ class Camera2BurstController(
 
     private fun threeAReady(result: TotalCaptureResult, selected: CameraConfig): Boolean {
         val manualSensorWillBeUsed = selected.supportsManualSensor &&
-            result.get(CaptureResult.SENSOR_EXPOSURE_TIME) != null &&
-            result.get(CaptureResult.SENSOR_SENSITIVITY) != null
+            (result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L) > 0L &&
+            (result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0) > 0
         return ThreeAStatePolicy.locked(
             result.get(CaptureResult.CONTROL_AE_STATE),
             result.get(CaptureResult.CONTROL_AWB_STATE),
@@ -604,7 +625,7 @@ class Camera2BurstController(
                 manualSensorWillBeUsed,
             ),
             selected.awbLockAvailable,
-            selected.autoFocusLockAvailable,
+            selected.focusLockAvailable,
         )
     }
 
@@ -614,6 +635,12 @@ class Camera2BurstController(
         val session = captureSession ?: return failBeforeBurst("Capture session was lost before burst")
         val camera = cameraDevice ?: return failBeforeBurst("Camera disconnected before burst")
         val reader = imageReader ?: return failBeforeBurst("Image reader was lost before burst")
+        if (selected.focusLockAvailable &&
+            lockedResult.get(CaptureResult.CONTROL_AF_STATE) != CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
+        ) {
+            failBeforeBurst("Unable to focus on the photo. Hold still, move a little farther away, and try again")
+            return
+        }
         lockPlan = null
         val writer = activeWriter
         if (writer == null || writer.captureId != plan.captureId) {
@@ -685,12 +712,16 @@ class Camera2BurstController(
                 // timestamp order because both callbacks run on the camera
                 // handler in monotonic order.
                 val indexed = TaggedCaptureResult(
-                    tagged.tag.copy(frameIndex = sweepFrameIndex++),
+                    tagged.tag.copy(
+                        frameIndex = sweepFrameIndex++,
+                        sweepPosition = sweep.keptPositions.remove(image.timestamp),
+                    ),
                     tagged.result,
                 )
                 dispatchFrameWrite(writer, image, indexed)
             },
             onDropImage = { image ->
+                sweep.keptPositions.remove(image.timestamp)
                 image.close()
                 // A kept frame evicted before its CaptureResult arrived is a
                 // view the sweep will never persist. Left silent it would
@@ -800,12 +831,19 @@ class Camera2BurstController(
             measurement.shiftY,
             measurement.sharpness,
             timestamp,
+            measurement.trackingResponse,
         )
         if (decision.keep && !sweep.stopped) {
             cameraHandler.post {
                 if (imageGeneration != generation || sweepSession !== sweep || activePairer == null) {
                     image.close()
                 } else {
+                    sweep.keptPositions[timestamp] = SweepFramePosition(
+                        decision.positionX,
+                        decision.positionY,
+                        sweep.analyzer.analysisWidth,
+                        measurement.sharpness,
+                    )
                     activePairer?.addImage(timestamp, image)
                 }
             }
@@ -891,19 +929,51 @@ class Camera2BurstController(
         imageHandler.post { sweep.analyzer.release() }
     }
 
+    private fun disableRotateAndCrop(builder: CaptureRequest.Builder, selected: CameraConfig) {
+        val modes = selected.characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES)
+        if (modes?.contains(CaptureRequest.SCALER_ROTATE_AND_CROP_NONE) == true) {
+            // YUV must retain the sensor coordinate system used by calibration
+            // and corners. Output orientation is applied after rectification.
+            builder.set(CaptureRequest.SCALER_ROTATE_AND_CROP, CaptureRequest.SCALER_ROTATE_AND_CROP_NONE)
+        }
+    }
+
     private fun applyLockedValues(
         builder: CaptureRequest.Builder,
         selected: CameraConfig,
         locked: TotalCaptureResult,
     ) {
+        disableRotateAndCrop(builder, selected)
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        val exposure = locked.get(CaptureResult.SENSOR_EXPOSURE_TIME)
-        val sensitivity = locked.get(CaptureResult.SENSOR_SENSITIVITY)
+        var exposure = locked.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        var sensitivity = locked.get(CaptureResult.SENSOR_SENSITIVITY)
         val frameDuration = locked.get(CaptureResult.SENSOR_FRAME_DURATION)
-        if (selected.supportsManualSensor && exposure != null && sensitivity != null) {
+        if (selected.supportsManualSensor && exposure != null && exposure > 0 &&
+            sensitivity != null && sensitivity > 0
+        ) {
+            val exposureRange = selected.characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            val sensitivityRange = selected.characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            if (requestedProfile.sweep && exposureRange != null && sensitivityRange != null) {
+                val sceneFlicker = locked.get(CaptureResult.STATISTICS_SCENE_FLICKER)
+                val motionExposure = SweepExposurePolicy.select(
+                    exposure,
+                    sensitivity,
+                    exposureRange.lower..exposureRange.upper,
+                    sensitivityRange.lower..sensitivityRange.upper,
+                    sceneFlicker,
+                )
+                exposure = motionExposure.timeNs
+                sensitivity = motionExposure.sensitivityIso
+                if (exposure > SweepExposurePolicy.motionExposureBudgetNs(sceneFlicker)) {
+                    activeWriter?.addWarning("Light is too low for a short sweep exposure; add light and move slowly")
+                }
+            }
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
             builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposure)
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, sensitivity)
+            locked.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST)?.let {
+                builder.set(CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST, it)
+            }
             builder.set(
                 CaptureRequest.SENSOR_FRAME_DURATION,
                 maxOf(
@@ -918,11 +988,18 @@ class Camera2BurstController(
             builder.set(CaptureRequest.CONTROL_AE_LOCK, selected.aeLockAvailable)
         }
         val focusDistance = locked.get(CaptureResult.LENS_FOCUS_DISTANCE)
-        if (selected.adjustableFocus && focusDistance != null) {
+        val minimumFocusDistance = selected.characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+        if (selected.adjustableFocus && focusDistance != null && focusDistance.isFinite() &&
+            minimumFocusDistance != null && focusDistance in 0f..minimumFocusDistance
+        ) {
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance)
         } else {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            // Retain the triggered AF lock when distance metadata is absent.
+            // Setting AF_OFF without a distance would use the template's
+            // default lens position and can throw a close print out of focus.
+            builder.set(CaptureRequest.CONTROL_AF_MODE, selected.focusLockMode)
+            builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
         }
         val gains = locked.get(CaptureResult.COLOR_CORRECTION_GAINS)
         val transform = locked.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
@@ -1124,8 +1201,11 @@ class Camera2BurstController(
         try {
             val cancel = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(previewSurface ?: return)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
-                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                disableRotateAndCrop(this, selected)
+                set(CaptureRequest.CONTROL_AF_MODE, selected.focusLockMode)
+                if (selected.focusLockAvailable) {
+                    set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                }
                 set(CaptureRequest.CONTROL_AE_LOCK, false)
                 set(CaptureRequest.CONTROL_AWB_LOCK, false)
             }.build()

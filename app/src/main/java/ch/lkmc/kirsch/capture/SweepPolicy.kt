@@ -27,6 +27,12 @@ class SweepPolicy(
     private val frameWidth: Int,
     private val settings: Settings = Settings(),
 ) {
+    private companion object {
+        // Phase-correlation response is normalized matching signal power.
+        // Nearly featureless frames otherwise report arbitrary large shifts.
+        const val MIN_TRACKING_RESPONSE = 0.1
+    }
+
     data class Settings(
         /**
          * Kept views must displace at least this fraction of the frame width
@@ -47,15 +53,13 @@ class SweepPolicy(
         val maxFrames: Int = 22,
         /** The sweep ends with whatever was gathered after this long. */
         val maxDurationNs: Long = 20_000_000_000L,
-        /** Frames sharper than this fraction of the recent best pass the stability gate. */
+        /** Frames sharper than this fraction of the sweep's best pass the stability gate. */
         val minSharpnessRatio: Double = 0.4,
-        /** How many recent frames define the sharpness reference. */
-        val sharpnessWindow: Int = 8,
     ) {
         init {
             require(directionReachFraction > 0 && minKeepSpacingFraction > 0)
             require(minFrames in 1..maxFrames)
-            require(maxDurationNs > 0 && sharpnessWindow > 0)
+            require(maxDurationNs > 0)
             require(minSharpnessRatio in 0.0..1.0)
         }
     }
@@ -74,11 +78,14 @@ class SweepPolicy(
          * instead of snapping to 100%, and the capture records a warning.
          */
         val endedEarly: Boolean,
+        /** Position of this observation relative to the sweep origin, in analysis pixels. */
+        val positionX: Double,
+        val positionY: Double,
     )
 
     private val directionTarget = settings.directionReachFraction * frameWidth
     private val minSpacing = settings.minKeepSpacingFraction * frameWidth
-    private val recentSharpness = ArrayDeque<Double>()
+    private var bestSharpness = 0.0
 
     // Reach of kept views along +x, +y, -x, -y relative to the first kept frame.
     private val reach = DoubleArray(4)
@@ -101,14 +108,28 @@ class SweepPolicy(
      * translation relative to the previous observed frame (pass zero for the
      * first frame); [sharpness] is any consistent per-frame focus metric.
      */
-    fun observe(shiftX: Double, shiftY: Double, sharpness: Double, timestampNs: Long): Decision {
+    fun observe(
+        shiftX: Double,
+        shiftY: Double,
+        sharpness: Double,
+        timestampNs: Long,
+        trackingResponse: Double = 1.0,
+    ): Decision {
         if (firstTimestampNs == Long.MIN_VALUE) firstTimestampNs = timestampNs
-        positionX += shiftX
-        positionY += shiftY
-        val sharpEnough = recentSharpness.isEmpty() ||
-            sharpness >= settings.minSharpnessRatio * recentSharpness.max()
-        recentSharpness.addLast(sharpness)
-        while (recentSharpness.size > settings.sharpnessWindow) recentSharpness.removeFirst()
+        val validMotion = shiftX.isFinite() && shiftY.isFinite() &&
+            trackingResponse.isFinite() && trackingResponse >= MIN_TRACKING_RESPONSE
+        val validSharpness = sharpness.isFinite() && sharpness >= 0.0
+        if (validMotion) {
+            positionX += shiftX
+            positionY += shiftY
+        }
+        val sharpEnough = validSharpness &&
+            sharpness >= settings.minSharpnessRatio * bestSharpness
+        if (validSharpness) {
+            // A moving window forgets a sharp starting view after a handful
+            // of blurred frames and starts admitting blur as the new normal.
+            bestSharpness = maxOf(bestSharpness, sharpness)
+        }
 
         var keep = false
         if (!completed && keptCount < settings.maxFrames) {
@@ -125,7 +146,9 @@ class SweepPolicy(
                 (positionY >= reach[1] + minSpacing && reach[1] < directionTarget) ||
                 (-positionX >= reach[2] + minSpacing && reach[2] < directionTarget) ||
                 (-positionY >= reach[3] + minSpacing && reach[3] < directionTarget)
-            if (spaced && extendsCoverage && (sharpEnough || keptCount == 0)) {
+            if (validMotion && validSharpness && spaced && extendsCoverage &&
+                (sharpEnough || keptCount == 0)
+            ) {
                 keep = true
                 keptCount += 1
                 lastKeptX = positionX
@@ -165,6 +188,8 @@ class SweepPolicy(
             directionProgress = directions,
             keptCount = keptCount,
             endedEarly = endedEarly,
+            positionX = positionX,
+            positionY = positionY,
         )
     }
 }

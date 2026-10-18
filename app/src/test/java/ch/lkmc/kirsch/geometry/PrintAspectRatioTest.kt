@@ -132,6 +132,17 @@ class PrintAspectRatioTest {
     }
 
     @Test
+    fun calibratedSingleAxisTiltPreservesPrintShape() {
+        val camera = CameraIntrinsics(FOCAL, FOCAL, IMAGE_WIDTH / 2.0, IMAGE_HEIGHT / 2.0)
+        for ((pitch, yaw) in listOf(35.0 to 0.0, 0.0 to 35.0, 0.0 to 0.0, 35.0 to 0.1)) {
+            val points = project(150.0, 100.0, pitch, yaw)
+            val ratio = PrintGeometry.aspectRatio(points, IMAGE_WIDTH, IMAGE_HEIGHT, camera)
+            assertNotNull("Calibrated pitch=$pitch yaw=$yaw", ratio)
+            assertEquals(1.5, ratio!!, 1e-6)
+        }
+    }
+
+    @Test
     fun rejectsCornersWithNoRealFocalLength() {
         // Found by search over random quads: this one drives squaredFocal
         // negative, so no camera squares these corners up.

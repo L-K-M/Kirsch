@@ -31,6 +31,7 @@ import org.json.JSONObject
 class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.Listener {
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 100
+        private const val STATE_PENDING_REVIEW = "pendingReviewScanId"
         const val PREFS_NAME = "kirsch-settings"
         const val PREF_PROFILE = "capture_profile"
         const val PREF_PRINT_ID = "print_id"
@@ -60,6 +61,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingReviewScanId = savedInstanceState?.getString(STATE_PENDING_REVIEW)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         SystemBars.optIn(this)
         buildUi()
@@ -114,6 +116,11 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         super.onPause()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_PENDING_REVIEW, pendingReviewScanId)
+    }
+
     override fun onDestroy() {
         controller.shutdown()
         super.onDestroy()
@@ -138,9 +145,8 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         val printId = preferences(this).getString(PREF_PRINT_ID, null)
             ?.takeIf(String::isNotBlank)
             ?: getString(R.string.unassigned_print_id)
-        pendingReviewScanId = null
         statusChip.visibility = View.GONE
-        controller.capture(printId)
+        pendingReviewScanId = controller.capture(printId, textureView.display?.rotation ?: Surface.ROTATION_0)
     }
 
     // Camera2BurstController.Listener
@@ -184,8 +190,10 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
         val status = record?.optString("status")
         val mode = record?.optString("mode")
         if (status == "accepted" && mode == "yuv-420-888") {
-            pendingReviewScanId = manifest.parentFile?.name
-            ScanQueue.enqueue(this, manifest, this)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                ScanQueue.enqueue(this, manifest, this)
+            }
         } else if (status == "accepted") {
             showStatus(getString(R.string.raw_acquisition_saved))
         } else {
@@ -206,7 +214,7 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
             statusChip.text = getString(R.string.scan_ready)
             statusChip.visibility = View.VISIBLE
             statusChip.announceForAccessibility(statusChip.text)
-            if (resumed && scanId != null && scanId == pendingReviewScanId) {
+            if (resumed && !capturing && scanId != null && scanId == pendingReviewScanId) {
                 pendingReviewScanId = null
                 startActivity(ReviewActivity.intent(this, result.manifest))
             }
@@ -298,12 +306,18 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
                             val state = when (record.optString("state")) {
                                 "accepted" -> getString(R.string.scan_state_accepted)
                                 "review" -> getString(R.string.scan_state_review)
+                                "failed" -> getString(R.string.scan_state_failed)
                                 else -> return@runCatching null
                             }
-                            manifest to "${record.getString("scan_id")} · $state"
+                            LibraryScan(
+                                manifest,
+                                "${record.getString("scan_id")} · $state",
+                                record.optString("state") == "failed",
+                                record.optString("error"),
+                            )
                         }.getOrNull()
                     }
-                    ?.sortedByDescending { it.first.parentFile?.name }
+                    ?.sortedByDescending { it.manifest.parentFile?.name }
                     .orEmpty()
             }
             runOnUiThread {
@@ -316,16 +330,34 @@ class MainActivity : Activity(), Camera2BurstController.Listener, ScanQueue.List
                         } else {
                             AlertDialog.Builder(this)
                                 .setTitle(R.string.library_title)
-                                .setItems(list.map { it.second }.toTypedArray()) { _, index ->
-                                    startActivity(ReviewActivity.intent(this, list[index].first))
+                                .setItems(list.map { it.label }.toTypedArray()) { _, index ->
+                                    val scan = list[index]
+                                    if (scan.failed) showRetryDialog(scan) else {
+                                        startActivity(ReviewActivity.intent(this, scan.manifest))
+                                    }
                                 }
                                 .show()
                         }
                     },
-                    onFailure = { showStatus(getString(R.string.no_scans)) },
+                    onFailure = { showStatus(getString(R.string.library_failed, it.message ?: it.javaClass.simpleName)) },
                 )
             }
         }, "kirsch-library").start()
+    }
+
+    private data class LibraryScan(val manifest: File, val label: String, val failed: Boolean, val error: String)
+
+    private fun showRetryDialog(scan: LibraryScan) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.retry_scan_title)
+            .setMessage(getString(R.string.retry_scan_message, scan.error))
+            .setPositiveButton(R.string.retry_scan_confirm) { _, _ ->
+                pendingReviewScanId = scan.manifest.parentFile?.name
+                runCatching { ScanQueue.retry(this, scan.manifest, this) }
+                    .onFailure { showStatus(getString(R.string.scan_failed, it.message ?: it.javaClass.simpleName)) }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun buildUi() {

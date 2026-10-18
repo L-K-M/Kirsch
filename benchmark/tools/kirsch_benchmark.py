@@ -1294,6 +1294,10 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
         "acquisition_sha256",
         "source_retained",
         "used_fusion",
+        "auto_crop_detected",
+        "fusion_failure",
+        "working_intrinsics",
+        "output_rotation_quarter_turns",
         "preview_path",
         "working_image_path",
         "processing_report",
@@ -1336,11 +1340,35 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
         or not SHA256_PATTERN.fullmatch(acquisition_digest)
     ):
         validator.issue("INVALID_SHA256", "/acquisition_sha256", "must be lowercase SHA-256")
-    for field in ("source_retained", "used_fusion"):
+    for field in ("source_retained", "used_fusion", "auto_crop_detected"):
         if field in data and not isinstance(data[field], bool):
             validator.issue("TYPE_BOOLEAN", f"/{field}", "must be a boolean")
     if "extensions" in data and not isinstance(data["extensions"], dict):
         validator.issue("TYPE_OBJECT", "/extensions", "must be an object")
+
+    def validate_rotation(value: Any, pointer: str) -> None:
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 3:
+            validator.issue("OUTPUT_ROTATION", pointer, "must be an integer from 0 to 3")
+
+    if "output_rotation_quarter_turns" in data:
+        validate_rotation(data["output_rotation_quarter_turns"], "/output_rotation_quarter_turns")
+    if "fusion_failure" in data and (
+        not isinstance(data["fusion_failure"], str) or not data["fusion_failure"].strip()
+    ):
+        validator.issue("FUSION_FAILURE", "/fusion_failure", "must be a non-empty reason")
+    if "working_intrinsics" in data:
+        camera = data["working_intrinsics"]
+        pointer = "/working_intrinsics"
+        fields = {"focal_x", "focal_y", "center_x", "center_y"}
+        if validator.require_keys(camera, pointer, fields):
+            validator.reject_unknown(camera, pointer, fields)
+            for field in fields:
+                value = camera.get(field)
+                if (
+                    not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value) or (field.startswith("focal_") and value <= 0)
+                ):
+                    validator.issue("CAMERA_INTRINSICS", f"{pointer}/{field}", "must be finite, with positive focal length")
 
     def validate_quad(value: Any, pointer: str) -> None:
         if not isinstance(value, dict):
@@ -1384,10 +1412,12 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
             "claim",
             "delivered_resolution_claimed",
         }
-        archival_allowed = archival_required | {"target_id"}
+        archival_allowed = archival_required | {"target_id", "rescaled_utc"}
         if validator.require_keys(archival, pointer, archival_required):
             validator.reject_unknown(archival, pointer, archival_allowed)
             validator.validate_timestamp(archival.get("recorded_utc"), f"{pointer}/recorded_utc")
+            if "rescaled_utc" in archival:
+                validator.validate_timestamp(archival["rescaled_utc"], f"{pointer}/rescaled_utc")
             authority = archival.get("authority")
             if authority not in {"confirmed-dimensions", "coplanar-target"}:
                 validator.issue("SCALE_AUTHORITY", f"{pointer}/authority", "invalid authority")
@@ -1471,10 +1501,13 @@ def validate_scan_package(manifest_path: Path) -> list[Issue]:
                     "created_utc",
                     "parent_path",
                     "parent_sha256",
+                    "output_rotation_quarter_turns",
                 }
                 if not validator.require_keys(derivative, pointer, derivative_required):
                     continue
                 validator.reject_unknown(derivative, pointer, derivative_allowed)
+                if "output_rotation_quarter_turns" in derivative:
+                    validate_rotation(derivative["output_rotation_quarter_turns"], f"{pointer}/output_rotation_quarter_turns")
                 if derivative.get("kind") not in {
                     "acquisition-master",
                     "acquisition-derived",

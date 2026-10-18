@@ -1,10 +1,9 @@
 package ch.lkmc.kirsch.capture
 
 import android.media.Image
-import org.opencv.core.Core
+import java.nio.ByteBuffer
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import org.opencv.core.MatOfDouble
 import org.opencv.imgproc.Imgproc
 
 /**
@@ -18,61 +17,93 @@ import org.opencv.imgproc.Imgproc
  * authority on actual geometry. Must be used from a single thread.
  */
 class SweepFrameAnalyzer(val analysisWidth: Int = 256) {
-    data class Measurement(val shiftX: Double, val shiftY: Double, val sharpness: Double)
+    data class Measurement(
+        val shiftX: Double,
+        val shiftY: Double,
+        val sharpness: Double,
+        val trackingResponse: Double = 1.0,
+    )
 
     private var previous: Mat? = null
 
+    init {
+        require(analysisWidth >= 3)
+    }
+
     fun measure(image: Image): Measurement {
         val plane = image.planes[0]
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
         val crop = image.cropRect
-        val step = maxOf(1, crop.width() / analysisWidth)
-        val width = crop.width() / step
-        val height = crop.height() / step
+        return measureLuma(
+            plane.buffer,
+            plane.rowStride,
+            plane.pixelStride,
+            crop.left,
+            crop.top,
+            crop.width(),
+            crop.height(),
+        )
+    }
+
+    internal fun measureLuma(
+        buffer: ByteBuffer,
+        rowStride: Int,
+        pixelStride: Int,
+        cropLeft: Int,
+        cropTop: Int,
+        cropWidth: Int,
+        cropHeight: Int,
+    ): Measurement {
+        val sharpness = LumaSharpness.measure(
+            buffer,
+            rowStride,
+            pixelStride,
+            cropLeft,
+            cropTop,
+            cropWidth,
+            cropHeight,
+        )
+        val width = minOf(cropWidth, analysisWidth)
+        val height = maxOf(1, cropHeight * width / cropWidth)
+        val base = buffer.position()
         val bytes = ByteArray(width * height)
         for (row in 0 until height) {
-            val rowOffset = (crop.top + row * step) * rowStride + crop.left * pixelStride
-            val columnStep = step * pixelStride
+            val sourceY = row * cropHeight / height
+            val rowOffset = base + (cropTop + sourceY) * rowStride + cropLeft * pixelStride
             for (column in 0 until width) {
-                bytes[row * width + column] = buffer.get(rowOffset + column * columnStep)
+                val sourceX = column * cropWidth / width
+                bytes[row * width + column] = buffer.get(rowOffset + sourceX * pixelStride)
             }
         }
         // The caller survives analysis exceptions and keeps sweeping, so
         // every native Mat must be released even on a throwing OpenCV call.
         val gray = Mat(height, width, CvType.CV_8UC1)
-        val laplacian = Mat()
-        val mean = MatOfDouble()
-        val deviation = MatOfDouble()
         var current: Mat? = null
+        var correlationWindow: Mat? = null
         try {
             gray.put(0, 0, bytes)
-            Imgproc.Laplacian(gray, laplacian, CvType.CV_32F)
-            Core.meanStdDev(laplacian, mean, deviation)
-            val sharpness = deviation.toArray()[0].let { it * it }
             val next = Mat()
             current = next
             gray.convertTo(next, CvType.CV_32FC1)
             val previousFrame = previous
+            val response = doubleArrayOf(1.0)
             val shift = if (previousFrame != null &&
                 previousFrame.rows() == next.rows() &&
                 previousFrame.cols() == next.cols()
             ) {
-                Imgproc.phaseCorrelate(previousFrame, next)
+                val window = Mat()
+                correlationWindow = window
+                Imgproc.phaseCorrelate(previousFrame, next, window, response)
             } else {
                 org.opencv.core.Point(0.0, 0.0)
             }
             previousFrame?.release()
             previous = next
             current = null
-            return Measurement(shift.x, shift.y, sharpness)
+            return Measurement(shift.x, shift.y, sharpness, response[0])
         } finally {
             gray.release()
-            laplacian.release()
-            mean.release()
-            deviation.release()
             current?.release()
+            correlationWindow?.release()
         }
     }
 
