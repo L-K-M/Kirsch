@@ -6,6 +6,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SweepPolicyTest {
+    @Test
+    fun unreliableTrackingCannotInventDirectionalCoverage() {
+        val policy = policy()
+        policy.observe(0.0, 0.0, 100.0, 0L)
+        val lost = policy.observe(100.0, 100.0, 100.0, 1L, trackingResponse = 0.0)
+        assertFalse(lost.keep)
+        assertEquals(0f, lost.progress)
+        assertEquals(0.0, lost.positionX, 0.0)
+        assertEquals(0.0, lost.positionY, 0.0)
+        assertFalse(policy.observe(100.0, 100.0, 100.0, 2L, trackingResponse = Double.NaN).keep)
+        val recovered = policy.observe(8.0, 0.0, 100.0, 2L, trackingResponse = 0.8)
+        assertTrue(recovered.keep)
+    }
+
+    @Test
+    fun sustainedBlurCannotBecomeTheNewSharpnessReference() {
+        val policy = policy()
+        policy.observe(0.0, 0.0, 100.0, 0L)
+        repeat(20) { index ->
+            val blurry = policy.observe(8.0, 0.0, 1.0, (index + 1) * 40_000_000L)
+            assertFalse("blurry frame ${index + 1} was kept", blurry.keep)
+        }
+        val sharpAgain = policy.observe(0.0, 8.0, 100.0, 900_000_000L)
+        assertTrue(sharpAgain.keep)
+    }
+
+    @Test
+    fun invalidMotionCannotPoisonLaterCoverage() {
+        val policy = policy()
+        policy.observe(0.0, 0.0, 100.0, 0L)
+        val invalid = policy.observe(Double.NaN, Double.POSITIVE_INFINITY, 100.0, 1L)
+        assertFalse(invalid.keep)
+        assertEquals(0f, invalid.progress)
+        val valid = policy.observe(8.0, 0.0, 100.0, 2L)
+        assertTrue(valid.keep)
+        assertTrue(valid.progress > 0f)
+    }
+
+    @Test
+    fun invalidSharpnessCannotPoisonTheStabilityReference() {
+        val policy = policy()
+        policy.observe(0.0, 0.0, 100.0, 0L)
+        assertFalse(policy.observe(8.0, 0.0, Double.NaN, 1L).keep)
+        assertTrue(policy.observe(8.0, 0.0, 100.0, 2L).keep)
+    }
+
     private fun policy(
         minFrames: Int = 5,
         maxFrames: Int = 22,

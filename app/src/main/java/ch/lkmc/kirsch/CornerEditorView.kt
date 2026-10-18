@@ -12,6 +12,8 @@ import kotlin.math.hypot
 import org.opencv.core.Point
 
 class CornerEditorView(context: Context) : View(context) {
+    var onCornersChanged: (() -> Unit)? = null
+
     private companion object {
         const val GRAB_RADIUS_DP = 48f
     }
@@ -81,6 +83,12 @@ class CornerEditorView(context: Context) : View(context) {
     }
 
     fun normalizedPoints(): List<Point> = points.map { Point(it.x, it.y) }
+
+    fun releaseImage() {
+        magnifier?.dismiss()
+        bitmap?.recycle()
+        bitmap = null
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -213,10 +221,14 @@ class CornerEditorView(context: Context) : View(context) {
 
     private fun updateCorner(x: Float, y: Float) {
         if (activeCorner !in points.indices) return
-        points[activeCorner] = Point(
+        val updated = Point(
             ((x + grabOffsetX - destination.left) / destination.width()).toDouble().coerceIn(0.0, 1.0),
             ((y + grabOffsetY - destination.top) / destination.height()).toDouble().coerceIn(0.0, 1.0),
         )
+        val previous = points[activeCorner]
+        if (previous.x == updated.x && previous.y == updated.y) return
+        points[activeCorner] = updated
+        onCornersChanged?.invoke()
         invalidate()
     }
 

@@ -45,6 +45,7 @@ object CaptureMetadata {
         .put("lens_aperture", result.get(CaptureResult.LENS_APERTURE))
         .put("lens_focal_length_mm", result.get(CaptureResult.LENS_FOCAL_LENGTH))
         .put("lens_focus_distance_diopters", result.get(CaptureResult.LENS_FOCUS_DISTANCE))
+        .put("lens_intrinsic_calibration", floatArray(result.get(CaptureResult.LENS_INTRINSIC_CALIBRATION)))
         .put("ae_state", result.get(CaptureResult.CONTROL_AE_STATE))
         .put("awb_state", result.get(CaptureResult.CONTROL_AWB_STATE))
         .put("af_state", result.get(CaptureResult.CONTROL_AF_STATE))
@@ -60,6 +61,8 @@ object CaptureMetadata {
         }))
         .put("color_correction_transform", result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)?.toString())
         .put("neutral_color_point", rationalArray(result.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)))
+        .put("distortion_correction_mode", result.get(CaptureResult.DISTORTION_CORRECTION_MODE))
+        .put("rotate_and_crop_mode", result.get(CaptureResult.SCALER_ROTATE_AND_CROP))
         .put("scaler_crop_region", rectJson(result.get(CaptureResult.SCALER_CROP_REGION)))
         .put("image_crop_region", rectJson(crop))
         .put(
@@ -68,6 +71,7 @@ object CaptureMetadata {
         )
         .put("lens_shading_map_mode", result.get(CaptureResult.STATISTICS_LENS_SHADING_MAP_MODE))
         .put("source_planes", sourcePlaneLayouts?.let(::planeLayoutsJson))
+        .put("sweep_position", tag.sweepPosition?.let(::sweepPositionJson))
 
     fun characteristicsJson(
         cameraId: String,
@@ -91,7 +95,12 @@ object CaptureMetadata {
             .put("capabilities", JSONArray(capabilities.toList()))
             .put("sensor_orientation_degrees", characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION))
             .put("sensor_active_array", rectJson(characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)))
+            .put("sensor_pre_correction_active_array", rectJson(characteristics.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE)))
             .put("sensor_pixel_array", sizeJson(characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)))
+            .put("sensor_physical_size_mm", characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.let {
+                JSONObject().put("width", it.width.toDouble()).put("height", it.height.toDouble())
+            })
+            .put("lens_intrinsic_calibration", floatArray(characteristics.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)))
             .put("sensor_white_level", characteristics.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL))
             .put("sensor_timestamp_source", characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE))
             .put("ae_lock_available", characteristics.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE))
@@ -107,6 +116,12 @@ object CaptureMetadata {
                 JSONArray(fpsRanges.map { range -> JSONArray(listOf(range.lower, range.upper)) }),
             )
     }
+
+    fun sweepPositionJson(position: SweepFramePosition): JSONObject = JSONObject()
+        .put("x", position.x)
+        .put("y", position.y)
+        .put("analysis_width", position.analysisWidth)
+        .put("sharpness", position.sharpness)
 
     private fun planeLayoutsJson(layouts: List<Yuv420Packer.PlaneLayout>): JSONArray =
         JSONArray(layouts.map { layout ->
@@ -145,6 +160,14 @@ data class BurstFrameTag(
     val generation: Long,
     val captureId: String,
     val frameIndex: Int,
+    val sweepPosition: SweepFramePosition? = null,
+)
+
+data class SweepFramePosition(
+    val x: Double,
+    val y: Double,
+    val analysisWidth: Int,
+    val sharpness: Double,
 )
 
 data class TaggedCaptureResult(

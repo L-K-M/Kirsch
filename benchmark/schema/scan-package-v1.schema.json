@@ -26,6 +26,10 @@
     },
     "source_retained": { "type": "boolean" },
     "used_fusion": { "type": "boolean" },
+    "auto_crop_detected": { "type": "boolean" },
+    "fusion_failure": { "type": "string", "minLength": 1 },
+    "working_intrinsics": { "$ref": "#/$defs/camera_intrinsics" },
+    "output_rotation_quarter_turns": { "$ref": "#/$defs/rotation" },
     "preview_path": { "$ref": "#/$defs/path" },
     "working_image_path": { "$ref": "#/$defs/path" },
     "processing_report": { "$ref": "#/$defs/path" },
@@ -67,6 +71,18 @@
     }
   },
   "$defs": {
+    "rotation": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "camera_intrinsics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["focal_x", "focal_y", "center_x", "center_y"],
+      "properties": {
+        "focal_x": { "type": "number", "exclusiveMinimum": 0 },
+        "focal_y": { "type": "number", "exclusiveMinimum": 0 },
+        "center_x": { "type": "number" },
+        "center_y": { "type": "number" }
+      }
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
@@ -113,6 +129,7 @@
         },
         "media_type": { "type": "string", "minLength": 1 },
         "recipe": { "type": "string", "minLength": 1 },
+        "output_rotation_quarter_turns": { "$ref": "#/$defs/rotation" },
         "created_utc": { "type": "string", "format": "date-time" },
         "parent_path": { "$ref": "#/$defs/path" },
         "parent_sha256": { "$ref": "#/$defs/sha256" },
