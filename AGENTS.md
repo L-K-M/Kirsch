@@ -170,3 +170,21 @@ may waive review; report that waiver rather than claiming review passed.
 
 <!-- shared-rules:end -->
 
+## Licensing
+
+- Kirsch's own code is Unlicense (`LICENSE`). Keep license statements in the
+  README and in-app text consistent with it; bundled components keep their own
+  licenses.
+- Before adding a dependency, vendored file or bundled asset (fonts, images,
+  icons, models, data), confirm its license allows redistribution in the APK.
+  Never vendor third-party code without its license file.
+- The AboutLibraries plugin builds `res/raw/aboutlibraries.json` (Settings >
+  Open-source licenses) from the resolved Gradle graph plus `app/config/`, and
+  fails on a dependency without license text or with a license outside the
+  allow-list in `app/build.gradle.kts`. Native code no POM describes (the
+  libraries OpenCV links statically, `libc++_shared.so`) needs a bundled entry
+  in `app/config/` whose text comes from the shipped version's upstream files.
+- CI runs `scripts/android_notices.py` (with `android-notices.toml`) and
+  `scripts/check-opencv-notices.py` on the debug APK before upload. The second
+  compares the entries with OpenCV's embedded build information, so an OpenCV
+  or NDK change needs refreshed entries. Keep both passing.

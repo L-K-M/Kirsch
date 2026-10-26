@@ -33,3 +33,9 @@ Build the Android app after installing JDK 17 and Android SDK 35:
 See [`app/README.md`](app/README.md) for capture, processing, review, and export behavior. [`PHASES1-3.md`](PHASES1-3.md) maps the implementation to the roadmap and records evidence-driven boundaries. [`ANALYSIS.md`](ANALYSIS.md) is the living backlog: what a full review of the scanner found, what has since landed, and what is open.
 
 [`PHASE0.md`](PHASE0.md) remains the immutable evidence record. A successful build is not represented as new physical, legal, usability, or image-quality evidence.
+
+## License
+
+Kirsch's own code is released under the [Unlicense](LICENSE). The Android app bundles OpenCV with the libraries it links statically (libjpeg-turbo, libpng, LibTIFF, libwebp, OpenJPEG, OpenEXR, Protocol Buffers, oneTBB and others), LLVM libc++ and the Kotlin standard library, which keep their own licenses. The x86 and x86_64 builds of OpenCV also contain Intel IPP ICV, which Intel licenses under the Intel Simplified Software License. Their notices ship inside the APK and appear under Settings > Open-source licenses.
+
+The Unlicense covers Kirsch's own code only. The Gradle wrapper files (`gradlew`, `gradlew.bat` and `gradle/wrapper/gradle-wrapper.jar`) are Gradle's and keep the Apache License 2.0.
