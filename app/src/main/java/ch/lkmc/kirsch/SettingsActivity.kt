@@ -26,8 +26,8 @@ import org.json.JSONObject
 
 /**
  * Debug, benchmark, and data controls, kept out of the scanning UI: capture
- * mode override, benchmark print ID, package export, and the capability
- * status list.
+ * mode override, benchmark print ID, package export, the capability status
+ * list, and the open-source licenses.
  */
 class SettingsActivity : Activity() {
     companion object {
@@ -297,6 +297,15 @@ class SettingsActivity : Activity() {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         content.addView(statusView)
+
+        content.addView(sectionHeader(R.string.settings_about_section))
+        content.addView(
+            Button(this).apply {
+                setText(R.string.open_source_licenses)
+                setOnClickListener { startActivity(Intent(this@SettingsActivity, LicensesActivity::class.java)) }
+            },
+        )
+        content.addView(caption(R.string.settings_licenses_caption))
 
         content.addView(
             TextView(this).apply {
