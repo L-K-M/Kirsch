@@ -1,0 +1,18 @@
+# Overrides for scripts/android_notices.py, which CI runs on the debug APK
+# before uploading it. Every native library in the APK must be claimed by a
+# notice entry: Maven components come from the resolved Gradle graph
+# (AboutLibraries), native code no POM describes from app/config/libraries.
+
+# Runtime components that must always be listed.
+require = ["org.opencv:opencv", "org.jetbrains.kotlin:kotlin-stdlib"]
+
+[[claim]]
+paths = ["lib/*/libopencv_java4.so"]
+requires = ["org.opencv:opencv"]
+reason = "OpenCV AAR; scripts/check-opencv-notices.py ties the libraries statically linked into it to its embedded build information"
+
+[[claim]]
+paths = ["lib/*/libc++_shared.so"]
+requires = ["kirsch:llvm-libcxx"]
+requires_text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
+reason = "NDK libc++_shared.so from the OpenCV AAR, redistributed as a standalone library: full LLVM text required"

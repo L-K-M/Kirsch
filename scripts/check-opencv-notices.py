@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Fail when the APK's notices miss code statically linked into OpenCV.
+
+libopencv_java4.so from the OpenCV AAR embeds its build information
+(cv::getBuildInformation()). It names the third-party libraries linked into
+each ABI's library and their versions, which no Maven POM describes. This
+check reads that text from every lib/<abi>/libopencv_java4.so in the APK and
+requires a matching entry, with the same version, in the AboutLibraries
+definitions (res/raw/aboutlibraries.json; bundled entries live in
+app/config/libraries). An OpenCV upgrade that adds a library or changes a
+version therefore fails until the notices are refreshed.
+
+Usage: python3 -I scripts/check-opencv-notices.py app/build/outputs/apk/debug/app-debug.apk
+Python 3.9+ standard library only. Exit status: 0 clean, 1 findings, 2 bad input.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import zipfile
+
+DEFINITIONS_ENTRY = "res/raw/aboutlibraries.json"
+OPENCV_LIBRARY = re.compile(r"lib/[^/]+/libopencv_java4\.so")
+BUILD_INFO_START = b"General configuration for OpenCV"
+
+# Names on the "3rdparty dependencies:" line -> notice entries in app/config/libraries.
+THIRD_PARTY = {
+    "libcpufeatures": "kirsch:cpufeatures",
+    "libprotobuf": "kirsch:protobuf",
+    "ade": "kirsch:ade",
+    "tbb": "kirsch:onetbb",
+    "ittnotify": "kirsch:ittnotify",
+    "libjpeg-turbo": "kirsch:libjpeg-turbo",
+    "libwebp": "kirsch:libwebp",
+    "libpng": "kirsch:libpng",
+    "libtiff": "kirsch:libtiff",
+    "libopenjp2": "kirsch:openjpeg",
+    "IlmImf": "kirsch:openexr",
+    "tegra_hal": "kirsch:carotene",
+    "ippiw": "kirsch:intel-ipp-icv",
+    "ippicv": "kirsch:intel-ipp-icv",
+}
+
+# Code inside OpenCV modules that OpenCV installs its own license file for
+# (sdk/etc/licenses), keyed by the module names on the "To be built:" line.
+MODULE_CODE = {
+    "core": ["kirsch:softfloat"],
+    "features2d": ["kirsch:mscr-chi-table"],
+    "gapi": ["kirsch:vas-ot"],
+}
+
+# Build-information lines whose version the entry's artifactVersion must
+# contain. A line that is absent (no IPP on ARM) requires nothing.
+VERSIONS = [
+    (r"General configuration for OpenCV ([\d.]+)", "org.opencv:opencv"),
+    (r"JPEG:\s+build-libjpeg-turbo \(ver ([\d.]+)", "kirsch:libjpeg-turbo"),
+    (r"PNG:\s+build \(ver ([\d.]+)\)", "kirsch:libpng"),
+    (r"TIFF:\s+build \(ver \d+ - ([\d.]+)\)", "kirsch:libtiff"),
+    (r"JPEG 2000:\s+build \(ver ([\d.]+)\)", "kirsch:openjpeg"),
+    (r"OpenEXR:\s+build \(ver ([\d.]+)\)", "kirsch:openexr"),
+    (r"Protobuf:\s+build \(([\d.]+)\)", "kirsch:protobuf"),
+    (r"Flatbuffers:\s+builtin/3rdparty \(([\d.]+)\)", "kirsch:flatbuffers"),
+    (r"Parallel framework:\s+TBB \(ver ([\d.]+)", "kirsch:onetbb"),
+    (r"Intel IPP:\s+([\d.]+)", "kirsch:intel-ipp-icv"),
+    # libc++_shared.so in the AAR comes from the NDK that built OpenCV.
+    (r"Android NDK:.*\(ver ([\d.]+)\)", "kirsch:llvm-libcxx"),
+]
+
+
+class InputError(Exception):
+    """Unusable input: exit status 2."""
+
+
+def build_info(data: bytes) -> str | None:
+    start = data.find(BUILD_INFO_START)
+    if start < 0:
+        return None
+    end = data.find(b"\0", start)
+    return data[start:end].decode("utf-8", "replace")
+
+
+def field(info: str, name: str) -> list[str]:
+    match = re.search(rf"^\s*{re.escape(name)}:[ \t]*(.*)$", info, re.MULTILINE)
+    return match.group(1).split() if match else []
+
+
+def has_version(entry_version: str, version: str) -> bool:
+    return re.search(rf"(?<![\d.]){re.escape(version)}(?!\d)", entry_version) is not None
+
+
+def check(apk_path: str) -> list[str]:
+    try:
+        apk = zipfile.ZipFile(apk_path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise InputError(f"cannot open {apk_path}: {exc}") from exc
+    names = apk.namelist()
+    libraries = sorted(name for name in names if OPENCV_LIBRARY.fullmatch(name))
+    if not libraries:
+        return []
+    if DEFINITIONS_ENTRY not in names:
+        return [f"{DEFINITIONS_ENTRY} missing: the APK ships OpenCV without notice definitions"]
+    try:
+        definitions = json.loads(apk.read(DEFINITIONS_ENTRY))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InputError(f"{DEFINITIONS_ENTRY}: {exc}") from exc
+    versions = {
+        lib.get("uniqueId"): str(lib.get("artifactVersion") or "")
+        for lib in definitions.get("libraries", [])
+    }
+
+    errors = []
+    for name in libraries:
+        info = build_info(apk.read(name))
+        if info is None:
+            errors.append(f"{name}: no OpenCV build information found")
+            continue
+        required = set()
+        for token in field(info, "3rdparty dependencies"):
+            if token not in THIRD_PARTY:
+                errors.append(
+                    f"{name}: statically linked '{token}' has no notice mapping; add a bundled "
+                    "entry in app/config and map it in scripts/check-opencv-notices.py"
+                )
+                continue
+            required.add(THIRD_PARTY[token])
+        for module in field(info, "To be built"):
+            required.update(MODULE_CODE.get(module, []))
+        for pattern, ident in VERSIONS:
+            match = re.search(pattern, info)
+            if not match:
+                continue
+            required.add(ident)
+            if ident in versions and not has_version(versions[ident], match.group(1)):
+                errors.append(
+                    f"{name}: {ident} is {match.group(1)} in the build information but "
+                    f"'{versions[ident]}' in the notices; refresh its entry and license text"
+                )
+        for ident in sorted(required - versions.keys()):
+            errors.append(f"{name}: no notice entry '{ident}' in {DEFINITIONS_ENTRY}")
+    return errors
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    try:
+        errors = check(sys.argv[1])
+    except InputError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for error in errors:
+        print(f"error: {error}", file=sys.stderr)
+    if errors:
+        return 1
+    print("ok")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
