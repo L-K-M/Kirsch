@@ -4,11 +4,12 @@
 libopencv_java4.so from the OpenCV AAR embeds its build information
 (cv::getBuildInformation()). It names the third-party libraries linked into
 each ABI's library and their versions, which no Maven POM describes. This
-check reads that text from every lib/<abi>/libopencv_java4.so in the APK and
-requires a matching entry, with the same version, in the AboutLibraries
+check reads that text from every lib/<abi>/libopencv_java<major>.so in the APK
+and requires a matching entry, with the same version, in the AboutLibraries
 definitions (res/raw/aboutlibraries.json; bundled entries live in
-app/config/libraries). An OpenCV upgrade that adds a library or changes a
-version therefore fails until the notices are refreshed.
+app/config/libraries). An OpenCV upgrade that adds a library, changes a
+version or rewords a version line therefore fails until the notices and this
+script are refreshed.
 
 Usage: python3 -I scripts/check-opencv-notices.py app/build/outputs/apk/debug/app-debug.apk
 Python 3.9+ standard library only. Exit status: 0 clean, 1 findings, 2 bad input.
@@ -22,7 +23,8 @@ import sys
 import zipfile
 
 DEFINITIONS_ENTRY = "res/raw/aboutlibraries.json"
-OPENCV_LIBRARY = re.compile(r"lib/[^/]+/libopencv_java4\.so")
+# Any major version: OpenCV 5 ships libopencv_java5.so.
+OPENCV_LIBRARY = re.compile(r"lib/[^/]+/libopencv_java\d+\.so")
 BUILD_INFO_START = b"General configuration for OpenCV"
 
 # Names on the "3rdparty dependencies:" line -> notice entries in app/config/libraries.
@@ -51,21 +53,23 @@ MODULE_CODE = {
     "gapi": ["kirsch:vas-ot"],
 }
 
-# Build-information lines whose version the entry's artifactVersion must
-# contain. A line that is absent (no IPP on ARM) requires nothing.
+# Build-information lines (label, pattern for the line's value, entry) whose
+# version the entry's artifactVersion must contain. Label None is the header.
+# A line that is absent (no IPP on ARM) requires nothing; a line whose value
+# no longer matches fails, so a reworded line cannot turn its check off.
 VERSIONS = [
-    (r"General configuration for OpenCV ([\d.]+)", "org.opencv:opencv"),
-    (r"JPEG:\s+build-libjpeg-turbo \(ver ([\d.]+)", "kirsch:libjpeg-turbo"),
-    (r"PNG:\s+build \(ver ([\d.]+)\)", "kirsch:libpng"),
-    (r"TIFF:\s+build \(ver \d+ - ([\d.]+)\)", "kirsch:libtiff"),
-    (r"JPEG 2000:\s+build \(ver ([\d.]+)\)", "kirsch:openjpeg"),
-    (r"OpenEXR:\s+build \(ver ([\d.]+)\)", "kirsch:openexr"),
-    (r"Protobuf:\s+build \(([\d.]+)\)", "kirsch:protobuf"),
-    (r"Flatbuffers:\s+builtin/3rdparty \(([\d.]+)\)", "kirsch:flatbuffers"),
-    (r"Parallel framework:\s+TBB \(ver ([\d.]+)", "kirsch:onetbb"),
-    (r"Intel IPP:\s+([\d.]+)", "kirsch:intel-ipp-icv"),
+    (None, r"General configuration for OpenCV ([\d.]+)", "org.opencv:opencv"),
+    ("JPEG", r"^build-libjpeg-turbo \(ver ([\d.]+)", "kirsch:libjpeg-turbo"),
+    ("PNG", r"^build \(ver ([\d.]+)\)", "kirsch:libpng"),
+    ("TIFF", r"^build \(ver \d+ - ([\d.]+)\)", "kirsch:libtiff"),
+    ("JPEG 2000", r"^build \(ver ([\d.]+)\)", "kirsch:openjpeg"),
+    ("OpenEXR", r"^build \(ver ([\d.]+)\)", "kirsch:openexr"),
+    ("Protobuf", r"^build \(([\d.]+)\)", "kirsch:protobuf"),
+    ("Flatbuffers", r"^builtin/3rdparty \(([\d.]+)\)", "kirsch:flatbuffers"),
+    ("Parallel framework", r"^TBB \(ver ([\d.]+)", "kirsch:onetbb"),
+    ("Intel IPP", r"^(\d+(?:\.\d+)+)", "kirsch:intel-ipp-icv"),
     # libc++_shared.so in the AAR comes from the NDK that built OpenCV.
-    (r"Android NDK:.*\(ver ([\d.]+)\)", "kirsch:llvm-libcxx"),
+    ("Android NDK", r"\(ver ([\d.]+)\)", "kirsch:llvm-libcxx"),
 ]
 
 
@@ -81,9 +85,13 @@ def build_info(data: bytes) -> str | None:
     return data[start:end].decode("utf-8", "replace")
 
 
-def field(info: str, name: str) -> list[str]:
+def value(info: str, name: str) -> str | None:
     match = re.search(rf"^\s*{re.escape(name)}:[ \t]*(.*)$", info, re.MULTILINE)
-    return match.group(1).split() if match else []
+    return match.group(1).strip() if match else None
+
+
+def field(info: str, name: str) -> list[str]:
+    return (value(info, name) or "").split()
 
 
 def has_version(entry_version: str, version: str) -> bool:
@@ -127,9 +135,16 @@ def check(apk_path: str) -> list[str]:
             required.add(THIRD_PARTY[token])
         for module in field(info, "To be built"):
             required.update(MODULE_CODE.get(module, []))
-        for pattern, ident in VERSIONS:
-            match = re.search(pattern, info)
+        for label, pattern, ident in VERSIONS:
+            line = info if label is None else value(info, label)
+            if line is None:
+                continue
+            match = re.search(pattern, line)
             if not match:
+                errors.append(
+                    f"{name}: unrecognized '{label or 'OpenCV version'}' line in the build "
+                    "information; check its notices and update VERSIONS in scripts/check-opencv-notices.py"
+                )
                 continue
             required.add(ident)
             if ident in versions and not has_version(versions[ident], match.group(1)):
