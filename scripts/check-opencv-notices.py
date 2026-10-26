@@ -8,8 +8,8 @@ check reads that text from every lib/<abi>/libopencv_java<major>.so in the APK
 and requires a matching entry, with the same version, in the AboutLibraries
 definitions (res/raw/aboutlibraries.json; bundled entries live in
 app/config/libraries). An OpenCV upgrade that adds a library, changes a
-version or rewords a version line therefore fails until the notices and this
-script are refreshed.
+version or rewords or renames one of these lines therefore fails until the
+notices and this script are refreshed.
 
 Usage: python3 -I scripts/check-opencv-notices.py app/build/outputs/apk/debug/app-debug.apk
 Python 3.9+ standard library only. Exit status: 0 clean, 1 findings, 2 bad input.
@@ -55,8 +55,9 @@ MODULE_CODE = {
 
 # Build-information lines (label, pattern for the line's value, entry) whose
 # version the entry's artifactVersion must contain. Label None is the header.
-# A line that is absent (no IPP on ARM) requires nothing; a line whose value
-# no longer matches fails, so a reworded line cannot turn its check off.
+# A line absent from one library (no IPP on ARM) requires nothing there, but a
+# label that no library prints fails (see check), and so does a line whose
+# value no longer matches: a renamed or reworded line cannot turn its check off.
 VERSIONS = [
     (None, r"General configuration for OpenCV ([\d.]+)", "org.opencv:opencv"),
     ("JPEG", r"^build-libjpeg-turbo \(ver ([\d.]+)", "kirsch:libjpeg-turbo"),
@@ -71,6 +72,10 @@ VERSIONS = [
     # libc++_shared.so in the AAR comes from the NDK that built OpenCV.
     ("Android NDK", r"\(ver ([\d.]+)\)", "kirsch:llvm-libcxx"),
 ]
+
+# Lines that say what is linked in; if OpenCV renamed one, nothing would be required.
+THIRD_PARTY_LINE = "3rdparty dependencies"
+MODULES_LINE = "To be built"
 
 
 class InputError(Exception):
@@ -119,13 +124,21 @@ def check(apk_path: str) -> list[str]:
     }
 
     errors = []
+    linked = set()  # entries named on some library's "3rdparty dependencies:" line
+    reported = set()  # VERSIONS labels that some library prints
     for name in libraries:
         info = build_info(apk.read(name))
         if info is None:
             errors.append(f"{name}: no OpenCV build information found")
             continue
+        for label in (THIRD_PARTY_LINE, MODULES_LINE):
+            if value(info, label) is None:
+                errors.append(
+                    f"{name}: no '{label}:' line in the build information; if OpenCV renamed "
+                    "it, update scripts/check-opencv-notices.py and the notices"
+                )
         required = set()
-        for token in field(info, "3rdparty dependencies"):
+        for token in field(info, THIRD_PARTY_LINE):
             if token not in THIRD_PARTY:
                 errors.append(
                     f"{name}: statically linked '{token}' has no notice mapping; add a bundled "
@@ -133,12 +146,14 @@ def check(apk_path: str) -> list[str]:
                 )
                 continue
             required.add(THIRD_PARTY[token])
-        for module in field(info, "To be built"):
+        linked |= required
+        for module in field(info, MODULES_LINE):
             required.update(MODULE_CODE.get(module, []))
         for label, pattern, ident in VERSIONS:
             line = info if label is None else value(info, label)
             if line is None:
                 continue
+            reported.add(label)
             match = re.search(pattern, line)
             if not match:
                 errors.append(
@@ -154,6 +169,17 @@ def check(apk_path: str) -> list[str]:
                 )
         for ident in sorted(required - versions.keys()):
             errors.append(f"{name}: no notice entry '{ident}' in {DEFINITIONS_ENTRY}")
+    # A label that no library prints was renamed or dropped, unless no library links
+    # the component it belongs to (IPP when the APK has no x86 ABIs).
+    for label, _, ident in VERSIONS:
+        if label is None or label in reported:
+            continue
+        if ident in THIRD_PARTY.values() and ident not in linked:
+            continue
+        errors.append(
+            f"no library prints a '{label}:' line in its build information; if OpenCV "
+            "renamed or dropped it, update VERSIONS in scripts/check-opencv-notices.py and the notices"
+        )
     return errors
 
 
