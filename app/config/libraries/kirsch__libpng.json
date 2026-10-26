@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/libpng-LICENSE, sha256 7317e078e2d3b5d7ba5a6159e650945153262b44b76f6700f8e9edb261c5143e",
+  "uniqueId": "kirsch:libpng",
+  "licenses": [
+    "libpng-2.0-libpng"
+  ],
+  "name": "libpng",
+  "artifactVersion": "1.6.43",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/libpng",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

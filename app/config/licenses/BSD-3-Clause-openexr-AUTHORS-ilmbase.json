@@ -1,0 +1,8 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/openexr-AUTHORS.ilmbase, sha256 3d01213ed07453794228b95e41fd5897bad65e1342ebfdefbe52311d6e1adcb4",
+  "hash": "BSD-3-Clause-openexr-AUTHORS-ilmbase",
+  "spdxId": "BSD-3-Clause",
+  "name": "BSD-3-Clause (OpenEXR AUTHORS.ilmbase)",
+  "url": "",
+  "content": "Developers:\n-----------\n\nFlorian Kainz <kainz@ilm.com>\nRod Bogart <rgb@ilm.com>\nDrew Hess <dhess@ilm.com>\nBill Anderson <wja@ilm.com>\nWojciech Jarosz <wjarosz@ucsd.edu>\n\nContributors:\n-------------\n\nRito Trevino\nJosh Pines\nChristian Rouet\n\nWin32 build system:\n-------------------\n\nNick Porcino <NPorcino@lucasarts.com>\nKimball Thurston\n"
+}

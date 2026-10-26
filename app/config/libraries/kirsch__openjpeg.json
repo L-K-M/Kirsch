@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/libopenjp2-LICENSE, sha256 a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+  "uniqueId": "kirsch:openjpeg",
+  "licenses": [
+    "BSD-2-Clause-openjpeg"
+  ],
+  "name": "OpenJPEG",
+  "artifactVersion": "2.5.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/openjpeg",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

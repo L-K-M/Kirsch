@@ -1,0 +1,8 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/ippicv-third-party-programs.txt, sha256 9e7cade36cdf1681de1258004472823acf4e09c8e9e5f7cbe810c0ccea232415",
+  "hash": "Intel-ISSL-ippicv-third-party",
+  "spdxId": "LicenseRef-Intel-ISSL",
+  "name": "Intel IPP third-party-programs.txt",
+  "url": "",
+  "content": "This third-party-programs.txt file applies to the Intel(R) Integrated Performance Primitives 2021 Update 0\nThere are not any Third Party Programs (as defined in the Agreement) included in this version of the Intel(R) Integrated Performance Primitives.\n"
+}

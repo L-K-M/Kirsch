@@ -1,0 +1,13 @@
+{
+  "_comment": "carotene has no LICENSE file: header of 3rdparty/carotene/include/carotene/functions.hpp, the distinct copyright lines of all carotene files and the notice in src/fast.cpp, opencv/opencv tag 4.10.0 (71d3237a093b60a27601c20e9ee6c3e52154e8b1)",
+  "uniqueId": "kirsch:carotene",
+  "licenses": [
+    "BSD-3-Clause-carotene"
+  ],
+  "name": "Carotene",
+  "artifactVersion": "0.0.1",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/carotene",
+  "description": "Statically linked into lib/arm64-v8a and lib/armeabi-v7a/libopencv_java4.so by OpenCV 4.10.0 (tegra_hal).",
+  "developers": [],
+  "tag": "bundled"
+}

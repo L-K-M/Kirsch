@@ -1,0 +1,14 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/libjpeg-turbo-LICENSE.md, sha256 e548c96c0c09397c94b5c5531836c02ff2c403f1f2b130cad8e3ec9439b5a7cc; opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/libjpeg-turbo-README.ijg, sha256 5c1f9094835d21f66ee0e9ce81c57264d2dd50801b19832d6723dc8cdbda080e",
+  "uniqueId": "kirsch:libjpeg-turbo",
+  "licenses": [
+    "BSD-3-Clause-libjpeg-turbo",
+    "IJG-libjpeg-turbo"
+  ],
+  "name": "libjpeg-turbo",
+  "artifactVersion": "3.0.3",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/libjpeg-turbo",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0. Covered by the IJG License and the Modified (3-clause) BSD License; its SIMD code bears the zlib License (see LICENSE.md). This software is based in part on the work of the Independent JPEG Group.",
+  "developers": [],
+  "tag": "bundled"
+}

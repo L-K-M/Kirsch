@@ -1,0 +1,8 @@
+{
+  "_comment": "OpenCV's own license is the POM's Apache-2.0 (config/licenses/Apache-2.0.json). The native libraries in opencv-4.10.0-android-sdk.zip are byte-identical (CRC) to those in the org.opencv:opencv:4.10.0 AAR, so that zip's sdk/etc/licenses is the license set for the code linked into them.",
+  "uniqueId": "org.opencv:opencv",
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "description": "Java bindings (classes.dex) and lib/*/libopencv_java4.so. The libraries OpenCV links statically into libopencv_java4.so are listed separately."
+}

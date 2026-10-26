@@ -104,7 +104,7 @@ scripts/install-debug.sh              # single connected device
 scripts/install-debug.sh <serial>     # pick one of several (see `adb devices`)
 ```
 
-OpenCV 4.10.0 is the only new runtime artifact and is recorded in `benchmark/ARTIFACTS.csv`.
+The APK bundles OpenCV and the Kotlin standard library. Their license notices, and those of the libraries OpenCV links statically and of the NDK's `libc++_shared.so`, are generated at build time and appear under Settings > Open-source licenses: the AboutLibraries Gradle plugin collects the resolved dependencies, and `app/config/` holds the native components no Maven POM describes. CI fails when the debug APK lacks any of them (`scripts/android_notices.py`, `scripts/check-opencv-notices.py`), so an OpenCV upgrade needs refreshed `app/config/` entries. `benchmark/ARTIFACTS.csv` records tooling provenance; it is not the APK's license inventory.
 
 Exported scan graphs can be checked without OpenCV:
 

@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/ittnotify-LICENSE.BSD (sha256 77cf47aa88df151faba9db8bbbfcff8e83dbe5f0ff0dac3ef76e63217f579a55), transcoded from Windows-1252 to UTF-8",
+  "uniqueId": "kirsch:ittnotify",
+  "licenses": [
+    "BSD-3-Clause-ittnotify"
+  ],
+  "name": "Intel ITT API (ittnotify)",
+  "artifactVersion": "OpenCV 4.10.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/ittnotify",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0. Dual licensed under BSD-3-Clause or GPL-2.0-only; used here under BSD-3-Clause.",
+  "developers": [],
+  "tag": "bundled"
+}

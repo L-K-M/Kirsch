@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/vasot-LICENSE.txt, sha256 a9c8a68807d39b6810d593008f02e7835a8f8280781e5ce9b544a7fb973bb79e",
+  "uniqueId": "kirsch:vas-ot",
+  "licenses": [
+    "MIT-vas-ot"
+  ],
+  "name": "VAS Object Tracker",
+  "artifactVersion": "OpenCV 4.10.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/modules/gapi/src/3rdparty/vasot",
+  "description": "Compiled into OpenCV's gapi module (lib/*/libopencv_java4.so).",
+  "developers": [],
+  "tag": "bundled"
+}

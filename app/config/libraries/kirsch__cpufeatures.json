@@ -1,0 +1,14 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/cpufeatures-LICENSE, sha256 c870d52f42a8f93023b99a85fe68d02637d6b04e5f35bbcd7f98759adb4e4d49; the full text is config/licenses/Apache-2.0.json",
+  "uniqueId": "kirsch:cpufeatures",
+  "licenses": [
+    "Apache-2.0",
+    "Apache-2.0-cpufeatures"
+  ],
+  "name": "cpufeatures",
+  "artifactVersion": "OpenCV 4.10.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/cpufeatures",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0. From the Android NDK.",
+  "developers": [],
+  "tag": "bundled"
+}

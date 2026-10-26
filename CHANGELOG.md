@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ship the license notices of OpenCV, the libraries it links statically, LLVM libc++ and the Kotlin standard library, shown under Settings > Open-source licenses.
 - Keep Save to Photos visible outside scrolling review controls and clear of system bars, including after corner correction and with large text.
 - Detect low-contrast and rounded print boundaries using color edges and supported straight sides.
 - Retain the sharpest recorded sweep view and preserve reference detail unless multiple views and spatial support justify glare replacement.

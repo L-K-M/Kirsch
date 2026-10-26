@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv/opencv tag 4.10.0 (71d3237a093b60a27601c20e9ee6c3e52154e8b1), 3rdparty/libwebp/COPYING, sha256 5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf; OpenCV does not install it under sdk/etc/licenses. Version 1.4.0 from src/dec/vp8i_dec.h",
+  "uniqueId": "kirsch:libwebp",
+  "licenses": [
+    "BSD-3-Clause-libwebp"
+  ],
+  "name": "libwebp",
+  "artifactVersion": "1.4.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/libwebp",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

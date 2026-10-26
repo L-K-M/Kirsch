@@ -42,6 +42,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Test, assemble, and lint
         run: ./gradlew testDebugUnitTest assembleDebug lintDebug
+      # The public debug APK must carry its third-party notices, including
+      # the libraries OpenCV links statically (android notices recipe).
+      - name: Check third-party notices in the APK
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          python3 -I scripts/android_notices.py check "$apk" --config android-notices.toml
+          # --fetch-from: the restored Gradle cache may lack some jars and aars;
+          # these are the repositories settings.gradle.kts resolves from.
+          python3 -I scripts/android_notices.py scan "$apk" --config android-notices.toml \
+            --fetch-from https://dl.google.com/dl/android/maven2 \
+            --fetch-from https://repo.maven.apache.org/maven2
+          python3 -I scripts/check-opencv-notices.py "$apk"
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:

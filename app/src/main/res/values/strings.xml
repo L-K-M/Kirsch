@@ -30,6 +30,9 @@
     <string name="settings_data_section">DATA</string>
     <string name="settings_export_caption">Zips acquisition and scan packages to a location you choose, for offline analysis. Scans export together with their source captures.</string>
     <string name="settings_capabilities_caption">Shows which processing features are available on this build, with recorded reasons for anything unavailable.</string>
+    <string name="settings_about_section">ABOUT</string>
+    <string name="open_source_licenses">Open-source licenses</string>
+    <string name="settings_licenses_caption">Kirsch’s own code is public domain (Unlicense). It includes OpenCV and other third-party components that keep their own licenses; see Open-source licenses.</string>
     <string name="settings_privacy_note">Kirsch has no network permission. Photos, captures, and scans stay on this device unless you export them.</string>
 
     <!-- Export -->
