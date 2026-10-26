@@ -1,0 +1,13 @@
+{
+  "_comment": "Apache-2.0: opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/ade-LICENSE is identical to config/licenses/Apache-2.0.json; version from modules/gapi/cmake/DownloadADE.cmake at opencv tag 4.10.0",
+  "uniqueId": "kirsch:ade",
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "name": "ADE Framework",
+  "artifactVersion": "0.1.2d",
+  "website": "https://github.com/opencv/ade/tree/v0.1.2d",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

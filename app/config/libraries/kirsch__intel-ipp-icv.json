@@ -1,0 +1,14 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/ippicv-EULA.txt, sha256 c1bf7165226036081d5cbe4baca565eb5e817fe56b9cf1ac7247688feb32b3e4; ippiw-EULA.txt is identical; opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/ippicv-third-party-programs.txt, sha256 9e7cade36cdf1681de1258004472823acf4e09c8e9e5f7cbe810c0ccea232415",
+  "uniqueId": "kirsch:intel-ipp-icv",
+  "licenses": [
+    "Intel-ISSL-ippicv",
+    "Intel-ISSL-ippicv-third-party"
+  ],
+  "name": "Intel IPP ICV and Integration Wrappers",
+  "artifactVersion": "2021.11.0",
+  "website": "https://github.com/opencv/opencv_3rdparty/tree/fd27188235d85e552de31425e7ea0f53ba73ba53/ippicv",
+  "description": "Statically linked into lib/x86 and lib/x86_64/libopencv_java4.so by OpenCV 4.10.0 (ippicv, ippiw). Proprietary binary under the Intel Simplified Software License, not an open-source license.",
+  "developers": [],
+  "tag": "bundled"
+}

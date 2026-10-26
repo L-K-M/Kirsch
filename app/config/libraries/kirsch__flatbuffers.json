@@ -1,0 +1,13 @@
+{
+  "_comment": "Apache-2.0: opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/flatbuffers-LICENSE.txt is identical to config/licenses/Apache-2.0.json",
+  "uniqueId": "kirsch:flatbuffers",
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "name": "FlatBuffers",
+  "artifactVersion": "23.5.9",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/flatbuffers",
+  "description": "Header-only library built into OpenCV's dnn module (lib/*/libopencv_java4.so).",
+  "developers": [],
+  "tag": "bundled"
+}

@@ -1,0 +1,15 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/openexr-LICENSE, sha256 14eba5f05238f57c77e94f0ebd29a0b3736ba0456ff990cda16e21b6903ac453; opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/openexr-AUTHORS.ilmbase, sha256 3d01213ed07453794228b95e41fd5897bad65e1342ebfdefbe52311d6e1adcb4; opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/openexr-AUTHORS.openexr, sha256 35560b29d013ceea33c66e8a0dfa4fc41768302e441c49bf98a3cffffbc17bde",
+  "uniqueId": "kirsch:openexr",
+  "licenses": [
+    "BSD-3-Clause-openexr",
+    "BSD-3-Clause-openexr-AUTHORS-ilmbase",
+    "BSD-3-Clause-openexr-AUTHORS-openexr"
+  ],
+  "name": "OpenEXR",
+  "artifactVersion": "2.3.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/openexr",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

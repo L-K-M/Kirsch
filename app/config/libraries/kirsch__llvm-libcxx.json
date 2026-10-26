@@ -1,0 +1,14 @@
+{
+  "_comment": "libc++ section of NOTICE.toolchain (lines 2316-2626) in android-ndk-r25c-linux.zip, NOTICE.toolchain sha256 7390f78e64e38adce1942f653a4e2f6586f9e75d29a7b863a3a25f31258e6a3f; sources/cxx-stl/llvm-libc++abi/LICENSE.TXT in android-ndk-r25c-linux.zip, sha256 e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+  "uniqueId": "kirsch:llvm-libcxx",
+  "licenses": [
+    "LLVM-libcxx",
+    "LLVM-libcxxabi"
+  ],
+  "name": "LLVM libc++ and libc++abi",
+  "artifactVersion": "NDK r25c (25.2.9519653)",
+  "website": "https://github.com/llvm/llvm-project/tree/main/libcxx",
+  "description": "lib/*/libc++_shared.so from Android NDK r25c (25.2.9519653, clang 14.0.7), shipped in the OpenCV AAR.",
+  "developers": [],
+  "tag": "bundled"
+}

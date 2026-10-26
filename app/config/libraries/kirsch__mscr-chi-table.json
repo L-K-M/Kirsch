@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/mscr-chi_table_LICENSE.txt, sha256 676858659f4115246b41f2f44dcfbf17db52c6b1755f1102b78a87062dff0c07",
+  "uniqueId": "kirsch:mscr-chi-table",
+  "licenses": [
+    "BSD-3-Clause-mscr-chi-table"
+  ],
+  "name": "MSCR chi_table.h",
+  "artifactVersion": "OpenCV 4.10.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/modules/features2d/3rdparty/mscr",
+  "description": "Compiled into OpenCV's features2d module (lib/*/libopencv_java4.so).",
+  "developers": [],
+  "tag": "bundled"
+}

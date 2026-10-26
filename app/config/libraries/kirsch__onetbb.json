@@ -1,0 +1,13 @@
+{
+  "_comment": "Apache-2.0: opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/tbb-LICENSE.txt is config/licenses/Apache-2.0.json without its leading blank line; version from 3rdparty/tbb/CMakeLists.txt at opencv tag 4.10.0",
+  "uniqueId": "kirsch:onetbb",
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "name": "oneTBB",
+  "artifactVersion": "2021.11.0",
+  "website": "https://github.com/oneapi-src/oneTBB/tree/v2021.11.0",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

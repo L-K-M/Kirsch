@@ -1,0 +1,8 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/openexr-AUTHORS.openexr, sha256 35560b29d013ceea33c66e8a0dfa4fc41768302e441c49bf98a3cffffbc17bde",
+  "hash": "BSD-3-Clause-openexr-AUTHORS-openexr",
+  "spdxId": "BSD-3-Clause",
+  "name": "BSD-3-Clause (OpenEXR AUTHORS.openexr)",
+  "url": "",
+  "content": "Developers:\n-----------\n\nFlorian Kainz <kainz@ilm.com>\nRod Bogart <rgb@ilm.com>\nDrew Hess <dhess@ilm.com>\nPaul Schneider <paultschneider@mac.com>\nBill Anderson <wja@ilm.com>\nWojciech Jarosz <wjarosz@ucsd.edu>\nAndrew Kunz <akunz@ilm.com>\nPiotr Stanczyk <pstanczyk@ilm.com>\nPeter Hillman <peterh@weta.co.nz>\nNick Porcino <nick.porcino@gmail.com>\nKimball Thurston\n\nContributors:\n-------------\n\nSimon Green <SGreen@nvidia.com>\nRito Trevino <etrevino@ilm.com>\nJosh Pines\nChristian Rouet\nRodrigo Damazio <rdamazio@lsi.usp.br>\nGreg Ward <gward@lmi.net>\nJoseph Goldstone <joseph@lp.com>\nLoren Carpenter, Pixar Animation Studios\nNicholas Yue <yue.nicholas@gmail.com>\nYunfeng Bai (ILM)\nPascal Jette (Autodesk)\nKarl Rasche, DreamWorks Animation <Karl.Rasche@dreamworks.com>\n\nWin32 build system:\n-------------------\n\nNick Porcino <NPorcino@lucasarts.com>\nKimball Thurston\n\nWin32 port contributors:\n------------------------\n\nDustin Graves <dgraves@computer.org>\nJukka Liimatta <jukka.liimatta@twilight3d.com>\nBaumann Konstantin <Konstantin.Baumann@hpi.uni-potsdam.de>\nDaniel Koch <daniel@eyeonline.com>\nE. Scott Larsen <larsene@cs.unc.edu>\nstephan mantler <step@acm.org>\nAndreas Kahler <AKahler@nxn-software.com>\nFrank Jargstorff <fjargstorff@nvidia.com>\nLutz Latta\n"
+}

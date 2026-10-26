@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/libtiff-COPYRIGHT, sha256 fbd6fed7938541d2c809c0826225fc85e551fdbfa8732b10f0c87e0847acafd7",
+  "uniqueId": "kirsch:libtiff",
+  "licenses": [
+    "libtiff-libtiff"
+  ],
+  "name": "LibTIFF",
+  "artifactVersion": "4.6.0",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/libtiff",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}

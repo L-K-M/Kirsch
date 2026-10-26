@@ -1,0 +1,13 @@
+{
+  "_comment": "opencv-4.10.0-android-sdk.zip, sdk/etc/licenses/protobuf-LICENSE, sha256 6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+  "uniqueId": "kirsch:protobuf",
+  "licenses": [
+    "BSD-3-Clause-protobuf"
+  ],
+  "name": "Protocol Buffers",
+  "artifactVersion": "3.19.1",
+  "website": "https://github.com/opencv/opencv/tree/4.10.0/3rdparty/protobuf",
+  "description": "Statically linked into lib/*/libopencv_java4.so by OpenCV 4.10.0.",
+  "developers": [],
+  "tag": "bundled"
+}
